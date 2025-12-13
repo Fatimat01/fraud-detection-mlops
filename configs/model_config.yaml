@@ -1,0 +1,21 @@
+data:
+  source: "data/creditcard.csv"
+  test_size: 0.2
+  random_state: 42
+
+features:
+  exclude: ["Time", "Class"]
+  target: "Class"
+
+model:
+  type: "xgboost"
+  params:
+    n_estimators: 100
+    max_depth: 6
+    learning_rate: 0.1
+    scale_pos_weight: 50  # Handle class imbalance
+    random_state: 42
+    eval_metric: "auc"
+
+training:
+  experiment_name: "fraud-detection"

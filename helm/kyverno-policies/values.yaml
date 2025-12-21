@@ -1,0 +1,45 @@
+# Default values for kyverno-policies
+
+# Install Kyverno if not already present
+kyverno:
+  enabled: true
+  replicaCount: 1
+
+# Image verification policy
+imageVerification:
+  enabled: true
+  registries:
+    - "*.dkr.ecr.*.amazonaws.com/fraud-detection-*"
+
+  # Cosign verification settings
+  cosign:
+    enabled: true
+    keyless: true
+    certificateIdentityRegexp: "https://github.com/YOUR_ORG/fraud-detection-mlops/.*"
+    certificateOIDCIssuer: "https://token.actions.githubusercontent.com"
+
+  # What happens on policy violation
+  validationFailureAction: Enforce  # Audit or Enforce
+
+  # Excluded namespaces
+  excludeNamespaces:
+    - kube-system
+    - kyverno
+    - kube-public
+    - kube-node-lease
+
+# Required labels policy
+requireLabels:
+  enabled: true
+  labels:
+    - app.kubernetes.io/name
+    - app.kubernetes.io/instance
+    - app.kubernetes.io/version
+
+# Restrict registries policy
+restrictRegistries:
+  enabled: true
+  allowedRegistries:
+    - "*.dkr.ecr.*.amazonaws.com"
+    - "docker.io/library"  # For base images
+  validationFailureAction: Enforce

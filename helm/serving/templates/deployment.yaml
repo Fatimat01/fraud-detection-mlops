@@ -1,0 +1,24 @@
+# yamllint disable-file
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "serving.fullname" . }}
+  labels:
+    {{- include "serving.labels" . | nindent 4 }}
+spec:
+  {{- if not .Values.autoscaling.enabled }}
+  replicas: {{ .Values.replicaCount }}
+  {{- end }}
+  selector:
+    matchLabels:
+      {{- include "serving.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "serving.selectorLabels" . | nindent 8 }}
+    spec:
+      containers:
+        - name: {{ .Chart.Name }}
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}

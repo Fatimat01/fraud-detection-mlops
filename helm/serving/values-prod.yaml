@@ -1,0 +1,23 @@
+# helm/serving/values-prod.yaml
+
+replicaCount: 3
+
+resources:
+  requests:
+    memory: "512Mi"
+    cpu: "500m"
+  limits:
+    memory: "1Gi"
+    cpu: "1000m"
+
+service:
+  type: LoadBalancer
+
+autoscaling:
+  enabled: true
+  minReplicas: 3
+  maxReplicas: 10
+  targetCPUUtilizationPercentage: 70
+
+env:
+  ENVIRONMENT: "prod"

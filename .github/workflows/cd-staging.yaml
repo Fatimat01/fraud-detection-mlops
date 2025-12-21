@@ -1,0 +1,319 @@
+# .github/workflows/cd-staging.yaml
+
+name: Deploy to Staging
+
+on:
+  workflow_run:
+    workflows: ["Build and Push Images"]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      git_tag:
+        description: 'Git tag to deploy (e.g., git-a1b2c3d)'
+        required: true
+
+env:
+  AWS_REGION: us-east-1
+  EKS_CLUSTER_NAME: fraud-detection-dev
+
+jobs:
+  deploy:
+    name: Deploy to Staging
+    runs-on: ubuntu-latest
+    if: ${{ github.event.workflow_run.conclusion == 'success' || github.event_name == 'workflow_dispatch' }}
+    environment: staging
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # ============================================
+      # Install Tools
+      # ============================================
+      - name: Install Cosign
+        run: |
+          curl -O -L "https://github.com/sigstore/cosign/releases/latest/download/cosign-linux-amd64"
+          sudo mv cosign-linux-amd64 /usr/local/bin/cosign
+          sudo chmod +x /usr/local/bin/cosign
+          cosign version
+
+      - name: Install Helm
+        uses: azure/setup-helm@v3
+        with:
+          version: 'v3.13.0'
+
+      # ============================================
+      # Get Image Tag
+      # ============================================
+      - name: Download image manifest
+        if: github.event_name == 'workflow_run'
+        uses: actions/download-artifact@v4
+        with:
+          pattern: release-artifacts-*
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          run-id: ${{ github.event.workflow_run.id }}
+
+      - name: Determine image tag
+        id: image
+        run: |
+          if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
+            GIT_TAG="${{ github.event.inputs.git_tag }}"
+          else
+            # Find the manifest file
+            MANIFEST_FILE=$(find . -name "image-manifest.json" | head -n 1)
+
+            if [ -z "$MANIFEST_FILE" ]; then
+              echo "❌ ERROR: image-manifest.json not found"
+              exit 1
+            fi
+
+            GIT_TAG=$(jq -r '.git_tag' "$MANIFEST_FILE")
+            SEMVER=$(jq -r '.semver' "$MANIFEST_FILE")
+
+            echo "semver=$SEMVER" >> $GITHUB_OUTPUT
+          fi
+
+          echo "git_tag=$GIT_TAG" >> $GITHUB_OUTPUT
+          echo "Deploying tag: $GIT_TAG"
+
+      # ============================================
+      # AWS Configuration
+      # ============================================
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Update kubeconfig
+        run: |
+          aws eks update-kubeconfig \
+            --region ${{ env.AWS_REGION }} \
+            --name ${{ env.EKS_CLUSTER_NAME }}
+
+          # Verify connection
+          kubectl cluster-info
+          kubectl get nodes
+
+      # ============================================
+      # Verify Image Signature
+      # ============================================
+      - name: Verify image exists in ECR
+        run: |
+          echo "Checking if image exists in ECR..."
+
+          aws ecr describe-images \
+            --repository-name fraud-detection-dev-serving \
+            --image-ids imageTag=${{ steps.image.outputs.git_tag }} \
+            || (echo "❌ Image not found in ECR" && exit 1)
+
+          echo "✓ Image found in ECR"
+
+      - name: Verify image signature
+        env:
+          COSIGN_EXPERIMENTAL: "true"
+        run: |
+          IMAGE="${{ steps.login-ecr.outputs.registry }}/fraud-detection-dev-serving:${{ steps.image.outputs.git_tag }}"
+
+          echo "========================================"
+          echo "Verifying signature for: $IMAGE"
+          echo "========================================"
+
+          # Verify signature exists and is valid
+          cosign verify "$IMAGE" \
+            --certificate-identity-regexp="https://github.com/${{ github.repository }}/.*" \
+            --certificate-oidc-issuer="https://token.actions.githubusercontent.com" \
+            | jq '.'
+
+          echo ""
+          echo "✓ Signature verified - image is authentic"
+          echo ""
+
+          # Extract and display signature metadata
+          echo "Signature Metadata:"
+          cosign verify "$IMAGE" \
+            --certificate-identity-regexp="https://github.com/${{ github.repository }}/.*" \
+            --certificate-oidc-issuer="https://token.actions.githubusercontent.com" \
+            | jq -r '.[0].optional | to_entries[] | "  \(.key): \(.value)"'
+
+      - name: Verify SBOM attestation
+        env:
+          COSIGN_EXPERIMENTAL: "true"
+        run: |
+          IMAGE="${{ steps.login-ecr.outputs.registry }}/fraud-detection-dev-serving:${{ steps.image.outputs.git_tag }}"
+
+          echo "Verifying SBOM attestation..."
+
+          cosign verify-attestation "$IMAGE" \
+            --type spdxjson \
+            --certificate-identity-regexp="https://github.com/${{ github.repository }}/.*" \
+            --certificate-oidc-issuer="https://token.actions.githubusercontent.com" \
+            | jq -r '.payload' | base64 -d | jq '.'
+
+          echo "✓ SBOM attestation verified"
+
+      # ============================================
+      # Deploy with Helm
+      # ============================================
+      - name: Deploy with Helm
+        run: |
+          echo "Deploying to staging namespace..."
+
+          helm upgrade --install fraud-detection-serving ./helm/serving \
+            --namespace staging \
+            --create-namespace \
+            --set image.repository=${{ steps.login-ecr.outputs.registry }}/fraud-detection-dev-serving \
+            --set image.tag=${{ steps.image.outputs.git_tag }} \
+            --values ./helm/serving/values-staging.yaml \
+            --atomic \
+            --timeout 5m \
+            --wait
+
+          echo "✓ Helm deployment complete"
+
+      - name: Verify deployment
+        run: |
+          echo "Verifying deployment status..."
+
+          kubectl rollout status deployment/fraud-detection-serving \
+            -n staging \
+            --timeout=300s
+
+          # Verify correct image is deployed
+          DEPLOYED_IMAGE=$(kubectl get deployment fraud-detection-serving -n staging \
+            -o jsonpath='{.spec.template.spec.containers[0].image}')
+
+          echo "Deployed image: $DEPLOYED_IMAGE"
+
+          if [[ "$DEPLOYED_IMAGE" != *"${{ steps.image.outputs.git_tag }}"* ]]; then
+            echo "❌ ERROR: Wrong image deployed!"
+            echo "Expected tag: ${{ steps.image.outputs.git_tag }}"
+            echo "Actual image: $DEPLOYED_IMAGE"
+            exit 1
+          fi
+
+          echo "✓ Correct image verified"
+
+      # ============================================
+      # Smoke Tests
+      # ============================================
+      - name: Run smoke tests
+        run: |
+          echo "Waiting for service to be ready..."
+          sleep 30
+
+          # Get service URL
+          SERVICE_URL=$(kubectl get svc fraud-detection-serving -n staging \
+            -o jsonpath='{.status.loadBalancer.ingress[0].hostname}')
+
+          if [ -z "$SERVICE_URL" ]; then
+            echo "❌ ERROR: Service URL not found"
+            kubectl describe svc fraud-detection-serving -n staging
+            exit 1
+          fi
+
+          echo "Service URL: http://$SERVICE_URL:8000"
+
+          # Health check
+          echo "Testing health endpoint..."
+          HEALTH_STATUS=$(curl -s -o /dev/null -w "%{http_code}" http://$SERVICE_URL:8000/health || echo "000")
+
+          if [ "$HEALTH_STATUS" != "200" ]; then
+            echo "❌ Health check failed with status: $HEALTH_STATUS"
+            kubectl logs -n staging -l app=fraud-detection-serving --tail=50
+            exit 1
+          fi
+
+          echo "✓ Health check passed (200)"
+
+          # Metrics endpoint
+          echo "Testing metrics endpoint..."
+          METRICS_STATUS=$(curl -s -o /dev/null -w "%{http_code}" http://$SERVICE_URL:8000/metrics || echo "000")
+
+          if [ "$METRICS_STATUS" != "200" ]; then
+            echo "⚠️  Metrics endpoint returned: $METRICS_STATUS"
+          else
+            echo "✓ Metrics endpoint passed (200)"
+          fi
+
+          echo ""
+          echo "✓ All smoke tests passed!"
+
+      # ============================================
+      # Tag as Staging Promoted
+      # ============================================
+      - name: Tag as staging-promoted
+        run: |
+          echo "Tagging image as staging-promoted..."
+
+          # Get image manifest
+          MANIFEST=$(aws ecr batch-get-image \
+            --repository-name fraud-detection-dev-serving \
+            --image-ids imageTag=${{ steps.image.outputs.git_tag }} \
+            --query 'images[0].imageManifest' \
+            --output text)
+
+          # Re-tag as staging-promoted
+          aws ecr put-image \
+            --repository-name fraud-detection-dev-serving \
+            --image-tag staging-promoted \
+            --image-manifest "$MANIFEST"
+
+          echo "✓ Tagged as staging-promoted"
+
+      # ============================================
+      # Deployment Record
+      # ============================================
+      - name: Create deployment record
+        run: |
+          cat > staging-deployment.json << EOF
+          {
+            "timestamp": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+            "environment": "staging",
+            "git_tag": "${{ steps.image.outputs.git_tag }}",
+            "semver": "${{ steps.image.outputs.semver }}",
+            "image": "${{ steps.login-ecr.outputs.registry }}/fraud-detection-dev-serving:${{ steps.image.outputs.git_tag }}",
+            "deployed_by": "${{ github.actor }}",
+            "workflow_run": "${{ github.run_id }}",
+            "signature_verified": true,
+            "sbom_verified": true,
+            "smoke_tests_passed": true
+          }
+          EOF
+
+          cat staging-deployment.json
+
+      - name: Upload deployment record
+        uses: actions/upload-artifact@v4
+        with:
+          name: staging-deployment-${{ steps.image.outputs.git_tag }}
+          path: staging-deployment.json
+          retention-days: 90
+
+      # ============================================
+      # Summary
+      # ============================================
+      - name: Post deployment summary
+        run: |
+          echo "### Staging Deployment Complete 🚀" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "#### Image Details" >> $GITHUB_STEP_SUMMARY
+          echo "- **Tag:** \`${{ steps.image.outputs.git_tag }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- **Image:** \`${{ steps.login-ecr.outputs.registry }}/fraud-detection-dev-serving:${{ steps.image.outputs.git_tag }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "#### Security Verification" >> $GITHUB_STEP_SUMMARY
+          echo "- **Signature:** ✓ Verified" >> $GITHUB_STEP_SUMMARY
+          echo "- **SBOM:** ✓ Verified" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "#### Deployment" >> $GITHUB_STEP_SUMMARY
+          echo "- **Namespace:** \`staging\`" >> $GITHUB_STEP_SUMMARY
+          echo "- **Deployed by:** ${{ github.actor }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Status:** ✓ Verified and promoted" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "#### Next Steps" >> $GITHUB_STEP_SUMMARY
+          echo "Image is ready for production promotion after testing." >> $GITHUB_STEP_SUMMARY

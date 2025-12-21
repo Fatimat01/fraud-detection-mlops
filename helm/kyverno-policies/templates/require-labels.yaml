@@ -1,0 +1,26 @@
+# yamllint disable-file
+{{- if .Values.requireLabels.enabled }}
+---
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: require-labels
+spec:
+  validationFailureAction: {{ .Values.requireLabels.validationFailureAction | quote }}
+  background: true
+  rules:
+    - name: check-for-labels
+      match:
+        any:
+          - resources:
+              kinds: ["Pod"]
+              namespaces: ["staging", "prod"]
+      validate:
+        message: "Required labels are missing"
+        pattern:
+          metadata:
+            labels:
+              {{- range .Values.requireLabels.labels }}
+              {{ . }}: "?*"
+              {{- end }}
+{{- end }}

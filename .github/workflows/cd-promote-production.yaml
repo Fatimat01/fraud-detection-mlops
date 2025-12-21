@@ -1,0 +1,230 @@
+# .github/workflows/cd-promote-production.yaml
+
+name: Promote to Production
+
+on:
+  workflow_dispatch:
+    inputs:
+      image_tag:
+        description: 'Image tag from staging (e.g., sha-a1b2c3d)'
+        required: true
+      reason:
+        description: 'Reason for deployment'
+        required: true
+
+env:
+  AWS_REGION: us-east-1
+  EKS_CLUSTER_NAME: fraud-detection-prod
+
+jobs:
+  pre-checks:
+    name: Pre-deployment Validation
+    runs-on: ubuntu-latest
+    outputs:
+      staging_image: ${{ steps.verify.outputs.staging_image }}
+      prod_image: ${{ steps.verify.outputs.prod_image }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Login to Amazon ECR
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Update kubeconfig
+        run: |
+          aws eks update-kubeconfig \
+            --region ${{ env.AWS_REGION }} \
+            --name ${{ env.EKS_CLUSTER_NAME }}
+
+      - name: Verify image in staging
+        id: verify
+        run: |
+          echo "Checking if image exists in staging..."
+
+          # Check staging deployment
+          STAGING_IMAGE=$(kubectl get deployment fraud-detection-serving -n staging \
+            -o jsonpath='{.spec.template.spec.containers[0].image}' || echo "none")
+
+          echo "Staging image: $STAGING_IMAGE"
+          echo "staging_image=$STAGING_IMAGE" >> $GITHUB_OUTPUT
+
+          if [[ "$STAGING_IMAGE" != *"${{ github.event.inputs.image_tag }}"* ]]; then
+            echo "ERROR: Image ${{ github.event.inputs.image_tag }} not deployed in staging"
+            echo "Current staging image: $STAGING_IMAGE"
+            exit 1
+          fi
+
+          echo "✓ Image verified in staging"
+
+          # Get current prod image
+          PROD_IMAGE=$(kubectl get deployment fraud-detection-serving -n prod \
+            -o jsonpath='{.spec.template.spec.containers[0].image}' || echo "none")
+
+          echo "Current prod image: $PROD_IMAGE"
+          echo "prod_image=$PROD_IMAGE" >> $GITHUB_OUTPUT
+
+      - name: Check image exists in ECR
+        run: |
+          echo "Verifying image exists in ECR..."
+
+          aws ecr describe-images \
+            --repository-name fraud-detection-dev-serving \
+            --image-ids imageTag=${{ github.event.inputs.image_tag }} \
+            || (echo "❌ Image not found in ECR" && exit 1)
+
+          echo "✓ Image found in ECR"
+
+      - name: Pre-deployment summary
+        run: |
+          echo "### Pre-deployment Checks" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- **Image to deploy:** ${{ github.event.inputs.image_tag }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Reason:** ${{ github.event.inputs.reason }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Requested by:** ${{ github.actor }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Current prod:** ${{ steps.verify.outputs.prod_image }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Staging verified:** ✓ Yes" >> $GITHUB_STEP_SUMMARY
+
+  promote:
+    name: Promote Image
+    runs-on: ubuntu-latest
+    needs: pre-checks
+
+    steps:
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Re-tag image as prod-latest
+        run: |
+          echo "Promoting ${{ github.event.inputs.image_tag }} to prod-latest..."
+
+          # Get image manifest
+          MANIFEST=$(aws ecr batch-get-image \
+            --repository-name fraud-detection-dev-serving \
+            --image-ids imageTag=${{ github.event.inputs.image_tag }} \
+            --query 'images[0].imageManifest' \
+            --output text)
+
+          # Re-tag as prod-latest
+          aws ecr put-image \
+            --repository-name fraud-detection-dev-serving \
+            --image-tag prod-latest \
+            --image-manifest "$MANIFEST"
+
+          echo "✓ Image re-tagged as prod-latest"
+
+  deploy:
+    name: Deploy to Production
+    runs-on: ubuntu-latest
+    needs: [pre-checks, promote]
+    environment: production  # Requires manual approval
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Update kubeconfig
+        run: |
+          aws eks update-kubeconfig \
+            --region ${{ env.AWS_REGION }} \
+            --name ${{ env.EKS_CLUSTER_NAME }}
+
+      - name: Install Helm
+        uses: azure/setup-helm@v3
+        with:
+          version: 'v3.13.0'
+
+      - name: Backup current state
+        run: |
+          echo "Backing up production deployment..."
+          kubectl get deployment fraud-detection-serving -n prod -o yaml > prod-backup.yaml
+
+          echo "Current prod image: ${{ needs.pre-checks.outputs.prod_image }}"
+
+      - name: Deploy with Helm
+        run: |
+          helm upgrade --install fraud-detection-serving ./helm/serving \
+            --namespace prod \
+            --create-namespace \
+            --set image.repository=${{ steps.login-ecr.outputs.registry }}/fraud-detection-dev-serving \
+            --set image.tag=${{ github.event.inputs.image_tag }} \
+            --values ./helm/serving/values-prod.yaml \
+            --atomic \
+            --timeout 10m \
+            --wait
+
+      - name: Verify deployment
+        run: |
+          kubectl rollout status deployment/fraud-detection-serving \
+            -n prod \
+            --timeout=600s
+
+          # Verify correct image is deployed
+          DEPLOYED_IMAGE=$(kubectl get deployment fraud-detection-serving -n prod \
+            -o jsonpath='{.spec.template.spec.containers[0].image}')
+
+          echo "Deployed image: $DEPLOYED_IMAGE"
+
+          if [[ "$DEPLOYED_IMAGE" != *"${{ github.event.inputs.image_tag }}"* ]]; then
+            echo "ERROR: Wrong image deployed!"
+            exit 1
+          fi
+
+      - name: Run smoke tests
+        run: |
+          echo "Waiting for service..."
+          sleep 30
+
+          SERVICE_URL=$(kubectl get svc fraud-detection-serving -n prod \
+            -o jsonpath='{.status.loadBalancer.ingress[0].hostname}')
+
+          echo "Testing endpoints..."
+          curl -f http://$SERVICE_URL:8000/health || exit 1
+          curl -f http://$SERVICE_URL:8000/metrics || exit 1
+
+          echo "✓ Production smoke tests passed!"
+
+      - name: Create deployment record
+        run: |
+          cat > deployment-record.json << EOF
+          {
+            "timestamp": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+            "image_tag": "${{ github.event.inputs.image_tag }}",
+            "previous_image": "${{ needs.pre-checks.outputs.prod_image }}",
+            "deployed_by": "${{ github.actor }}",
+            "reason": "${{ github.event.inputs.reason }}",
+            "environment": "production"
+          }
+          EOF
+
+          cat deployment-record.json
+
+      - name: Post deployment summary
+        run: |
+          echo "### Production Deployment Complete" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- **Image:** ${{ github.event.inputs.image_tag }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Previous:** ${{ needs.pre-checks.outputs.prod_image }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Reason:** ${{ github.event.inputs.reason }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Deployed by:** ${{ github.actor }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Timestamp:** $(date -u)" >> $GITHUB_STEP_SUMMARY

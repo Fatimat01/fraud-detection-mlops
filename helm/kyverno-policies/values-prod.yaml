@@ -1,0 +1,8 @@
+imageVerification:
+  validationFailureAction: Enforce  # Block in production
+
+requireLabels:
+  validationFailureAction: Enforce
+
+restrictRegistries:
+  validationFailureAction: Enforce

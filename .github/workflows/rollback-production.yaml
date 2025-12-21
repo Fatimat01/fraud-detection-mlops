@@ -1,0 +1,91 @@
+# .github/workflows/rollback-production.yaml
+
+name: Rollback Production
+
+on:
+  workflow_dispatch:
+    inputs:
+      revision:
+        description: 'Helm revision to rollback to (leave empty for previous)'
+        required: false
+      reason:
+        description: 'Reason for rollback'
+        required: true
+
+env:
+  AWS_REGION: us-east-1
+  EKS_CLUSTER_NAME: fraud-detection-dev
+
+jobs:
+  rollback:
+    name: Rollback Production
+    runs-on: ubuntu-latest
+    environment: production  # Requires approval
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Update kubeconfig
+        run: |
+          aws eks update-kubeconfig \
+            --region ${{ env.AWS_REGION }} \
+            --name ${{ env.EKS_CLUSTER_NAME }}
+
+      - name: Install Helm
+        uses: azure/setup-helm@v3
+        with:
+          version: 'v3.13.0'
+
+      - name: View release history
+        run: |
+          echo "### Release History 📜" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          helm history fraud-detection-serving -n prod >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+
+          helm history fraud-detection-serving -n prod
+
+      - name: Execute rollback
+        run: |
+          if [ -z "${{ github.event.inputs.revision }}" ]; then
+            echo "Rolling back to previous revision..."
+            helm rollback fraud-detection-serving -n prod --wait --timeout 5m
+          else
+            echo "Rolling back to revision ${{ github.event.inputs.revision }}..."
+            helm rollback fraud-detection-serving ${{ github.event.inputs.revision }} \
+              -n prod --wait --timeout 5m
+          fi
+
+      - name: Verify rollback
+        run: |
+          kubectl rollout status deployment/fraud-detection-serving \
+            -n prod \
+            --timeout=300s
+
+          # Health check
+          SERVICE_URL=$(kubectl get svc fraud-detection-serving -n prod \
+            -o jsonpath='{.status.loadBalancer.ingress[0].hostname}')
+
+          curl -f http://$SERVICE_URL:8000/health || exit 1
+
+          echo "✓ Rollback verified!"
+
+      - name: Post rollback summary
+        run: |
+          NEW_IMAGE=$(kubectl get deployment fraud-detection-serving -n prod \
+            -o jsonpath='{.spec.template.spec.containers[0].image}')
+
+          echo "### Rollback Complete ⏪" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- **Reason:** ${{ github.event.inputs.reason }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Executed by:** ${{ github.actor }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Current Image:** $NEW_IMAGE" >> $GITHUB_STEP_SUMMARY
+          echo "- **Rollback Time:** $(date -u)" >> $GITHUB_STEP_SUMMARY

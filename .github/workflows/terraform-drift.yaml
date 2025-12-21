@@ -1,0 +1,158 @@
+# .github/workflows/terraform-drift.yaml
+
+name: Terraform Drift Detection
+
+on:
+  schedule:
+    - cron: '0 6 * * *'  # Daily at 6 AM UTC
+  workflow_dispatch:
+
+env:
+  TERRAFORM_VERSION: "1.9.0"
+  AWS_REGION: us-east-1
+
+jobs:
+  drift-dev:
+    name: Detect Drift - Dev
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TERRAFORM_VERSION }}
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Terraform Init
+        run: |
+          cd infrastructure/terraform/environments/dev
+          terraform init
+
+      - name: Terraform Plan
+        id: plan
+        run: |
+            cd infrastructure/terraform/environments/dev
+            terraform plan -detailed-exitcode -no-color > plan.txt
+            echo "exitcode=$?" >> $GITHUB_OUTPUT
+        continue-on-error: true
+
+      - name: Check for drift
+        run: |
+          EXIT_CODE=${{ steps.plan.outputs.exitcode }}
+
+          if [ "$EXIT_CODE" -eq "2" ]; then
+            echo "### ⚠️ Drift Detected - Dev Environment" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "Infrastructure has drifted from Terraform state." >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "<details><summary>Show Drift</summary>" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo '```' >> $GITHUB_STEP_SUMMARY
+            cat infrastructure/terraform/environments/dev/plan.txt >> $GITHUB_STEP_SUMMARY
+            echo '```' >> $GITHUB_STEP_SUMMARY
+            echo "</details>" >> $GITHUB_STEP_SUMMARY
+
+            # Send notification (configure webhook URL in secrets)
+            # curl -X POST ${{ secrets.SLACK_WEBHOOK_URL }} \
+            #   -H 'Content-Type: application/json' \
+            #   -d '{"text":"Terraform drift detected in dev environment"}'
+          fi
+
+  drift-staging:
+    name: Detect Drift - Staging
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TERRAFORM_VERSION }}
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Terraform Init
+        run: |
+          cd infrastructure/terraform/environments/staging
+          terraform init
+
+      - name: Terraform Plan
+        id: plan
+        run: |
+            cd infrastructure/terraform/environments/dev
+            terraform plan -detailed-exitcode -no-color > plan.txt
+            echo "exitcode=$?" >> $GITHUB_OUTPUT
+        continue-on-error: true
+
+      - name: Check for drift
+        run: |
+          EXIT_CODE=${{ steps.plan.outputs.exitcode }}
+
+          if [ "$EXIT_CODE" -eq "2" ]; then
+            echo "### ⚠️ Drift Detected - Staging Environment" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "Infrastructure has drifted from Terraform state." >> $GITHUB_STEP_SUMMARY
+          fi
+
+  drift-prod:
+    name: Detect Drift - Production
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TERRAFORM_VERSION }}
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Terraform Init
+        run: |
+          cd infrastructure/terraform/environments/prod
+          terraform init
+
+      - name: Terraform Plan
+        id: plan
+        run: |
+            cd infrastructure/terraform/environments/prod
+            terraform plan -detailed-exitcode -no-color > plan.txt
+            echo "exitcode=$?" >> $GITHUB_OUTPUT
+        continue-on-error: true
+
+      - name: Check for drift
+        run: |
+          EXIT_CODE=${{ steps.plan.outputs.exitcode }}
+
+          if [ "$EXIT_CODE" -eq "2" ]; then
+            echo "### 🚨 DRIFT DETECTED - PRODUCTION" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "**CRITICAL**: Production infrastructure has drifted!" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "<details><summary>Show Drift</summary>" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo '```' >> $GITHUB_STEP_SUMMARY
+            cat infrastructure/terraform/environments/prod/plan.txt >> $GITHUB_STEP_SUMMARY
+            echo '```' >> $GITHUB_STEP_SUMMARY
+            echo "</details>" >> $GITHUB_STEP_SUMMARY
+
+            # Send critical alert
+            # curl -X POST ${{ secrets.PAGERDUTY_WEBHOOK_URL }} ...
+          fi

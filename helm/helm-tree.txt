@@ -1,0 +1,24 @@
+.
+├── helm-tree.txt
+├── kyverno-policies
+│   ├── Chart.yaml
+│   ├── README.md
+│   ├── templates
+│   │   ├── require-labels.yaml
+│   │   ├── restrict-registries.yaml
+│   │   └── verify-images.yaml
+│   ├── values-staging.yaml
+│   ├── values.prod.yaml
+│   └── values.yaml
+└── serving
+    ├── Chart.yaml
+    ├── templates
+    │   ├── _helpers.tpl
+    │   ├── deployment.yaml
+    │   ├── hpa.yaml
+    │   └── service.yaml
+    ├── values-prod.yaml
+    ├── values-staging.yaml
+    └── values.yaml
+
+5 directories, 17 files

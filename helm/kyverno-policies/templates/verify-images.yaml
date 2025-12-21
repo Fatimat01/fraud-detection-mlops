@@ -1,0 +1,29 @@
+# yamllint disable-file
+{{- if .Values.imageVerification.enabled }}
+---
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: verify-fraud-detection-images
+spec:
+  validationFailureAction: {{ .Values.imageVerification.validationFailureAction | quote }}
+  background: true
+  rules:
+    - name: verify-image-signature
+      match:
+        any:
+          - resources:
+              kinds: ["Pod"]
+              namespaces: ["staging", "prod"]
+      verifyImages:
+        - imageReferences:
+            {{- range .Values.imageVerification.registries }}
+            - "{{ . }}"
+            {{- end }}
+          attestors:
+            - entries:
+                - keyless:
+                    subject: "{{ .Values.imageVerification.cosign.certificateIdentityRegexp }}"
+                    issuer: "{{ .Values.imageVerification.cosign.certificateOIDCIssuer }}"
+          required: true
+{{- end }}

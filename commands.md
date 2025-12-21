@@ -67,3 +67,4 @@ fraud-detection-mlops/
 └── tests/
     └── ...
 ```
+aws secretsmanager delete-secret --secret-id fraud-detection-dev-db-credentials --force-delete-without-recovery

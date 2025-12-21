@@ -1,0 +1,24 @@
+# yamllint disable-file
+{{- if .Values.restrictRegistries.enabled }}
+---
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: restrict-image-registries
+spec:
+  validationFailureAction: {{ .Values.restrictRegistries.validationFailureAction | quote }}
+  background: true
+  rules:
+    - name: validate-registries
+      match:
+        any:
+          - resources:
+              kinds: ["Pod"]
+              namespaces: ["staging", "prod"]
+      validate:
+        message: "Image registry is not allowed"
+        pattern:
+          spec:
+            containers:
+              - image: "{{ join \"|\" .Values.restrictRegistries.allowedRegistries }}*"
+{{- end }}

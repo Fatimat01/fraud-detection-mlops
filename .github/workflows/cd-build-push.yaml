@@ -1,0 +1,179 @@
+# GitHub Actions Workflow for Building, Scanning, Signing, and Pushing Docker Images
+name: Build, Scan, Sign, and Push Images
+
+on:
+  workflow_run:
+    workflows: ["CI Pipeline"]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Semantic version (e.g., v1.2.3)'
+        required: false
+
+env:
+  AWS_REGION: us-east-1
+  ECR_REGISTRY_TRAINING: fraud-detection-dev-training
+  ECR_REGISTRY_SERVING: fraud-detection-dev-serving
+
+jobs:
+  build-scan-push:
+    name: Build → Scan → Sign → Push
+    runs-on: ubuntu-latest
+    if: |
+      github.event.workflow_run.conclusion == 'success' ||
+      github.event_name == 'workflow_dispatch'
+
+    permissions:
+      id-token: write
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # =====================================================
+      # Tooling
+      # =====================================================
+      - name: Install security tooling
+        run: |
+          # Syft for SBOM generation
+          curl -sSfL https://raw.githubusercontent.com/anchore/syft/main/install.sh \
+            | sh -s -- -b /usr/local/bin
+
+          # Cosign for image signing & attestations
+          curl -O -L https://github.com/sigstore/cosign/releases/latest/download/cosign-linux-amd64
+          sudo mv cosign-linux-amd64 /usr/local/bin/cosign
+          sudo chmod +x /usr/local/bin/cosign
+
+      # =====================================================
+      # Image Tagging
+      # =====================================================
+      - name: Generate image tag
+        id: tag
+        run: |
+          GIT_SHA=$(git rev-parse --short HEAD)
+
+          if [ -n "${{ github.event.inputs.version }}" ]; then
+            TAG="${{ github.event.inputs.version }}-$GIT_SHA"
+          else
+            TAG="git-$GIT_SHA"
+          fi
+
+          echo "tag=$TAG" >> $GITHUB_OUTPUT
+          echo "Image tag: $TAG"
+
+      # =====================================================
+      # AWS Authentication
+      # =====================================================
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-region: ${{ env.AWS_REGION }}
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+
+      - name: Login to Amazon ECR
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      # =====================================================
+      # Image Build (Local Only)
+      # =====================================================
+      - name: Build training image
+        run: |
+          docker build \
+            -f docker/Dockerfile.training \
+            -t training:${{ steps.tag.outputs.tag }} .
+
+      - name: Build serving image
+        run: |
+          docker build \
+            -f docker/Dockerfile.serving \
+            -t serving:${{ steps.tag.outputs.tag }} .
+
+      # =====================================================
+      # Image Security Scanning (Blocking)
+      # =====================================================
+      - name: Scan training image (Trivy)
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: training:${{ steps.tag.outputs.tag }}
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true
+          exit-code: 1
+          format: table
+
+      - name: Scan serving image (Trivy)
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: serving:${{ steps.tag.outputs.tag }}
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true
+          exit-code: 1
+          format: table
+
+      # =====================================================
+      # Push Images (Only If Scans Pass)
+      # =====================================================
+      - name: Push training image
+        run: |
+          docker tag training:${{ steps.tag.outputs.tag }} \
+            ${{ env.ECR_REGISTRY_TRAINING }}:${{ steps.tag.outputs.tag }}
+
+          docker push \
+            ${{ env.ECR_REGISTRY_TRAINING }}:${{ steps.tag.outputs.tag }}
+
+      - name: Push serving image
+        run: |
+          docker tag serving:${{ steps.tag.outputs.tag }} \
+            ${{ env.ECR_REGISTRY_SERVING }}:${{ steps.tag.outputs.tag }}
+
+          docker push \
+            ${{ env.ECR_REGISTRY_SERVING }}:${{ steps.tag.outputs.tag }}
+
+      # =====================================================
+      # Image Signing (Keyless)
+      # =====================================================
+      - name: Sign images with Cosign
+        env:
+          COSIGN_EXPERIMENTAL: "true"
+        run: |
+          cosign sign --yes \
+            ${{ env.ECR_REGISTRY_TRAINING }}:${{ steps.tag.outputs.tag }}
+
+          cosign sign --yes \
+            ${{ env.ECR_REGISTRY_SERVING }}:${{ steps.tag.outputs.tag }}
+
+      # =====================================================
+      # SBOM Generation & Attestation
+      # =====================================================
+      - name: Generate SBOM (serving image)
+        run: |
+          syft ${{ env.ECR_REGISTRY_SERVING }}:${{ steps.tag.outputs.tag }} \
+            -o spdx-json=sbom-serving.json
+
+      - name: Attest SBOM
+        env:
+          COSIGN_EXPERIMENTAL: "true"
+        run: |
+          cosign attest --yes \
+            --predicate sbom-serving.json \
+            --type spdxjson \
+            ${{ env.ECR_REGISTRY_SERVING }}:${{ steps.tag.outputs.tag }}
+
+      # =====================================================
+      # Workflow Summary
+      # =====================================================
+      - name: Post build summary
+        run: |
+          echo "### Build & Push Complete 🚀" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- **Tag:** ${{ steps.tag.outputs.tag }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Image Scan:** ✓ Trivy (HIGH/CRITICAL enforced)" >> $GITHUB_STEP_SUMMARY
+          echo "- **Signed:** ✓ Cosign keyless" >> $GITHUB_STEP_SUMMARY
+          echo "- **SBOM:** ✓ Generated & attested" >> $GITHUB_STEP_SUMMARY

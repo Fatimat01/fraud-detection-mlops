@@ -1,0 +1,8 @@
+imageVerification:
+  validationFailureAction: Audit  # Log only in staging
+
+requireLabels:
+  validationFailureAction: Audit
+
+restrictRegistries:
+  validationFailureAction: Audit

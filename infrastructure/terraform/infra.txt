@@ -1,0 +1,60 @@
+.
+├── bootstrap
+│   ├── main.tf
+│   ├── terraform.tfstate
+│   └── terraform.tfstate.backup
+├── deploy.sh
+├── environments
+│   ├── dev
+│   │   ├── locals.tf
+│   │   ├── main.tf
+│   │   ├── outputs.tf
+│   │   ├── providers.tf
+│   │   ├── terraform.tfvars
+│   │   └── variables.tf
+│   ├── prod
+│   └── staging
+├── modules
+│   ├── ecr
+│   │   ├── main.tf
+│   │   ├── outputs.tf
+│   │   ├── providers.tf
+│   │   └── variables.tf
+│   ├── eks
+│   │   ├── README.md
+│   │   ├── main.tf
+│   │   ├── outputs.tf
+│   │   ├── providers.tf
+│   │   └── variables.tf
+│   ├── helm-addons
+│   │   ├── README.md
+│   │   ├── cert-manager.tf
+│   │   ├── grafana.tf
+│   │   ├── ingress-nginx.tf
+│   │   ├── kyverno.tf
+│   │   ├── lb-controller.tf
+│   │   ├── loki.tf
+│   │   ├── main.tf
+│   │   ├── outputs.tf
+│   │   ├── prometheus.tf
+│   │   └── variables.tf
+│   ├── kyverno-policies
+│   │   ├── main.tf
+│   │   └── variables.tf
+│   ├── rds
+│   │   ├── main.tf
+│   │   ├── outputs.tf
+│   │   └── variables.tf
+│   ├── s3
+│   │   ├── main.tf
+│   │   ├── outputs.tf
+│   │   ├── providers.tf
+│   │   └── variables.tf
+│   └── vpc
+│       ├── main.tf
+│       ├── outputs.tf
+│       ├── providers.tf
+│       └── variables.tf
+└── tree.txt
+
+14 directories, 44 files

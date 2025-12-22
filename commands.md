@@ -3,6 +3,39 @@ make lint
 # Run tests
 make test
 
+## Local end-to-end deployment (Terraform + ECR + Helm)
+- 1. Set AWS + deployment variables (use your AWS profile or SSO as needed)
+export AWS_REGION=us-east-1
+export AWS_ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+export ECR_REGISTRY=$AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com
+export TF_ENV=dev
+export HELM_ENV=staging
+export K8S_NAMESPACE=staging
+
+- 2. Bootstrap Terraform backend (first time only)
+make tf-bootstrap
+
+- 3. Provision infrastructure
+make tf-init
+make tf-plan
+make tf-apply
+
+- 4. Configure kubectl for the new cluster
+make kubeconfig
+
+- 5. Train or refresh local model artifacts
+python -m src.training.train
+
+- 6. Build and push images to ECR
+make push-ecr
+
+- 7. Deploy to the cluster with Helm
+make helm-deploy
+
+- 8. Verify rollout + smoke tests
+make k8s-verify
+make k8s-smoke
+
 ## train model and test locally
 - 1. Train model locally first (creates models/ directory)
 python -m src.training.train
@@ -11,10 +44,10 @@ python -m src.training.train
 make build-local
 
 - 3. Start services (MLflow, Serving, Prometheus, Grafana)
-docker-compose up -d mlflow serving prometheus grafana
+make local-up
 
 - 4. Check services
-docker-compose ps
+make local-status
 
 - 5. Test API
 curl http://localhost:8000/health

@@ -1,174 +1,87 @@
-# .github/workflows/terraform-apply.yaml
-
 name: Terraform Apply
 
 on:
-  push:
-    branches: [main]
-    paths:
-      - 'infrastructure/terraform/**'
   workflow_dispatch:
     inputs:
       environment:
-        description: 'Environment to deploy'
+        description: 'Environment to apply'
         required: true
         type: choice
         options:
           - dev
           - staging
           - prod
+      reason:
+        description: 'Reason for applying infrastructure changes'
+        required: true
 
 env:
   TERRAFORM_VERSION: "1.9.0"
   AWS_REGION: us-east-1
 
 jobs:
-  detect-changes:
-    name: Detect Changed Environments
+  apply:
+    name: Terraform Apply
     runs-on: ubuntu-latest
-    if: github.event_name == 'push'
-    outputs:
-      dev: ${{ steps.filter.outputs.dev }}
-      staging: ${{ steps.filter.outputs.staging }}
-      prod: ${{ steps.filter.outputs.prod }}
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 2
+    environment: ${{ github.event.inputs.environment }}
 
-      - uses: dorny/paths-filter@v2
-        id: filter
-        with:
-          filters: |
-            dev:
-              - 'infrastructure/terraform/environments/dev/**'
-              - 'infrastructure/terraform/modules/**'
-            staging:
-              - 'infrastructure/terraform/environments/staging/**'
-              - 'infrastructure/terraform/modules/**'
-            prod:
-              - 'infrastructure/terraform/environments/prod/**'
-              - 'infrastructure/terraform/modules/**'
+    permissions:
+      contents: read
+      id-token: write
 
-  apply-dev:
-    name: Apply to Dev
-    runs-on: ubuntu-latest
-    needs: detect-changes
-    if: |
-      (github.event_name == 'push' && needs.detect-changes.outputs.dev == 'true') ||
-      (github.event_name == 'workflow_dispatch' && github.event.inputs.environment == 'dev')
-    environment: dev
     steps:
       - uses: actions/checkout@v4
 
+      # =====================================================
+      # Terraform Setup
+      # =====================================================
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v3
         with:
           terraform_version: ${{ env.TERRAFORM_VERSION }}
 
+      # =====================================================
+      # AWS Authentication
+      # =====================================================
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
+          aws-region: ${{ env.AWS_REGION }}
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: ${{ env.AWS_REGION }}
 
+      # =====================================================
+      # Terraform Init
+      # =====================================================
       - name: Terraform Init
         run: |
-          cd infrastructure/terraform/environments/dev
+          cd infrastructure/terraform/environments/${{ github.event.inputs.environment }}
           terraform init
 
+      # =====================================================
+      # Terraform Plan (Visibility Before Apply)
+      # =====================================================
+      - name: Terraform Plan
+        run: |
+          cd infrastructure/terraform/environments/${{ github.event.inputs.environment }}
+          terraform plan -no-color
+
+      # =====================================================
+      # Terraform Apply
+      # =====================================================
       - name: Terraform Apply
         run: |
-          cd infrastructure/terraform/environments/dev
+          cd infrastructure/terraform/environments/${{ github.event.inputs.environment }}
           terraform apply -auto-approve
 
-      - name: Post deployment summary
+      # =====================================================
+      # Post-Apply Summary
+      # =====================================================
+      - name: Post apply summary
         run: |
-          echo "### Terraform Apply - Dev ✅" >> $GITHUB_STEP_SUMMARY
+          echo "### Terraform Apply Complete ✅" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "- **Environment:** dev" >> $GITHUB_STEP_SUMMARY
-          echo "- **Applied by:** ${{ github.actor }}" >> $GITHUB_STEP_SUMMARY
-          echo "- **Commit:** ${{ github.sha }}" >> $GITHUB_STEP_SUMMARY
-
-  apply-staging:
-    name: Apply to Staging
-    runs-on: ubuntu-latest
-    needs: detect-changes
-    if: |
-      (github.event_name == 'push' && needs.detect-changes.outputs.staging == 'true') ||
-      (github.event_name == 'workflow_dispatch' && github.event.inputs.environment == 'staging')
-    environment: staging
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Setup Terraform
-        uses: hashicorp/setup-terraform@v3
-        with:
-          terraform_version: ${{ env.TERRAFORM_VERSION }}
-
-      - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: ${{ env.AWS_REGION }}
-
-      - name: Terraform Init
-        run: |
-          cd infrastructure/terraform/environments/staging
-          terraform init
-
-      - name: Terraform Apply
-        run: |
-          cd infrastructure/terraform/environments/staging
-          terraform apply -auto-approve
-
-      - name: Post deployment summary
-        run: |
-          echo "### Terraform Apply - Staging ✅" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "- **Environment:** staging" >> $GITHUB_STEP_SUMMARY
-          echo "- **Applied by:** ${{ github.actor }}" >> $GITHUB_STEP_SUMMARY
-          echo "- **Commit:** ${{ github.sha }}" >> $GITHUB_STEP_SUMMARY
-
-  apply-prod:
-    name: Apply to Production
-    runs-on: ubuntu-latest
-    needs: detect-changes
-    if: |
-      (github.event_name == 'push' && needs.detect-changes.outputs.prod == 'true') ||
-      (github.event_name == 'workflow_dispatch' && github.event.inputs.environment == 'prod')
-    environment: production  # Requires approval
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Setup Terraform
-        uses: hashicorp/setup-terraform@v3
-        with:
-          terraform_version: ${{ env.TERRAFORM_VERSION }}
-
-      - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: ${{ env.AWS_REGION }}
-
-      - name: Terraform Init
-        run: |
-          cd infrastructure/terraform/environments/prod
-          terraform init
-
-      - name: Terraform Apply
-        run: |
-          cd infrastructure/terraform/environments/prod
-          terraform apply -auto-approve
-
-      - name: Post deployment summary
-        run: |
-          echo "### Terraform Apply - Production ✅" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "- **Environment:** production" >> $GITHUB_STEP_SUMMARY
+          echo "- **Environment:** ${{ github.event.inputs.environment }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Reason:** ${{ github.event.inputs.reason }}" >> $GITHUB_STEP_SUMMARY
           echo "- **Applied by:** ${{ github.actor }}" >> $GITHUB_STEP_SUMMARY
           echo "- **Commit:** ${{ github.sha }}" >> $GITHUB_STEP_SUMMARY

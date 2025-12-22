@@ -1,4 +1,28 @@
-.PHONY: install lint format test test-all security build run-local stop-local clean
+.PHONY: install lint format test test-all security build buildx-setup \
+	run-local stop-local clean \
+	local-build local-up local-down local-status local-logs local-train local-restart-serving \
+	tf-bootstrap tf-init tf-plan tf-apply tf-destroy tf-output kubeconfig \
+	ecr-login build-training-ecr build-serving-ecr build-ecr push-training-ecr push-serving-ecr push-ecr \
+	helm-deploy helm-status helm-uninstall k8s-verify k8s-smoke
+
+COMPOSE_CMD ?= docker compose
+COMPOSE_FILE ?= docker-compose.yaml
+AWS_REGION ?= us-east-1
+AWS_ACCOUNT_ID ?= $(shell aws sts get-caller-identity --query Account --output text 2>/dev/null)
+ECR_REGISTRY ?= $(AWS_ACCOUNT_ID).dkr.ecr.$(AWS_REGION).amazonaws.com
+ECR_REPOSITORY_TRAINING ?= fraud-detection-dev-training
+ECR_REPOSITORY_SERVING ?= fraud-detection-dev-serving
+IMAGE_TAG ?= git-$(shell git rev-parse --short HEAD)
+TF_ENV ?= dev
+TF_DIR ?= infrastructure/terraform/environments/$(TF_ENV)
+TF_BOOTSTRAP_DIR ?= infrastructure/terraform/bootstrap
+EKS_CLUSTER_NAME ?=
+HELM_RELEASE ?= fraud-detection-serving
+HELM_ENV ?= staging
+K8S_NAMESPACE ?= $(HELM_ENV)
+HELM_VALUES ?= ./helm/serving/values-$(HELM_ENV).yaml
+HELM_VALUES_FILE := $(wildcard $(HELM_VALUES))
+HELM_VALUES_ARG := $(if $(HELM_VALUES_FILE),--values $(HELM_VALUES_FILE),)
 
 # Platform targets
 PLATFORMS := linux/amd64,linux/arm64
@@ -51,10 +75,113 @@ build-serving:
 build: build-training build-serving
 
 run-local:
-	docker-compose up -d
+	$(MAKE) local-up
 
 stop-local:
-	docker-compose down
+	$(MAKE) local-down
+
+local-build:
+	$(COMPOSE_CMD) -f $(COMPOSE_FILE) build
+
+local-up:
+	$(COMPOSE_CMD) -f $(COMPOSE_FILE) up -d --build mlflow serving prometheus grafana
+
+local-down:
+	$(COMPOSE_CMD) -f $(COMPOSE_FILE) down
+
+local-status:
+	$(COMPOSE_CMD) -f $(COMPOSE_FILE) ps
+
+local-logs:
+	$(COMPOSE_CMD) -f $(COMPOSE_FILE) logs -f --tail=200
+
+local-train:
+	$(COMPOSE_CMD) -f $(COMPOSE_FILE) --profile training up -d mlflow
+	$(COMPOSE_CMD) -f $(COMPOSE_FILE) --profile training run --rm training
+
+local-restart-serving:
+	$(COMPOSE_CMD) -f $(COMPOSE_FILE) restart serving
+
+tf-bootstrap:
+	terraform -chdir=$(TF_BOOTSTRAP_DIR) init
+	terraform -chdir=$(TF_BOOTSTRAP_DIR) apply
+
+tf-init:
+	terraform -chdir=$(TF_DIR) init
+
+tf-plan:
+	terraform -chdir=$(TF_DIR) plan
+
+tf-apply:
+	terraform -chdir=$(TF_DIR) plan -out=tfplan
+	terraform -chdir=$(TF_DIR) apply tfplan
+	rm -f $(TF_DIR)/tfplan
+
+tf-destroy:
+	terraform -chdir=$(TF_DIR) destroy
+
+tf-output:
+	terraform -chdir=$(TF_DIR) output
+
+kubeconfig:
+	@if [ -n "$(EKS_CLUSTER_NAME)" ]; then \
+		aws eks update-kubeconfig --region $(AWS_REGION) --name $(EKS_CLUSTER_NAME); \
+	else \
+		CLUSTER_NAME=$$(terraform -chdir=$(TF_DIR) output -raw eks_cluster_name); \
+		aws eks update-kubeconfig --region $(AWS_REGION) --name $$CLUSTER_NAME; \
+	fi
+
+ecr-login:
+	aws ecr get-login-password --region $(AWS_REGION) \
+		| docker login --username AWS --password-stdin $(ECR_REGISTRY)
+
+build-training-ecr:
+	docker build -f docker/Dockerfile.training \
+		-t $(ECR_REGISTRY)/$(ECR_REPOSITORY_TRAINING):$(IMAGE_TAG) .
+
+build-serving-ecr:
+	docker build -f docker/Dockerfile.serving \
+		-t $(ECR_REGISTRY)/$(ECR_REPOSITORY_SERVING):$(IMAGE_TAG) .
+
+build-ecr: build-training-ecr build-serving-ecr
+
+push-training-ecr: ecr-login build-training-ecr
+	docker push $(ECR_REGISTRY)/$(ECR_REPOSITORY_TRAINING):$(IMAGE_TAG)
+
+push-serving-ecr: ecr-login build-serving-ecr
+	docker push $(ECR_REGISTRY)/$(ECR_REPOSITORY_SERVING):$(IMAGE_TAG)
+
+push-ecr: push-training-ecr push-serving-ecr
+
+helm-deploy:
+	helm upgrade --install $(HELM_RELEASE) ./helm/serving \
+		--namespace $(K8S_NAMESPACE) \
+		--create-namespace \
+		--set image.repository=$(ECR_REGISTRY)/$(ECR_REPOSITORY_SERVING) \
+		--set image.tag=$(IMAGE_TAG) \
+		$(HELM_VALUES_ARG) \
+		--atomic \
+		--timeout 10m \
+		--wait
+
+helm-status:
+	helm status $(HELM_RELEASE) -n $(K8S_NAMESPACE)
+
+helm-uninstall:
+	helm uninstall $(HELM_RELEASE) -n $(K8S_NAMESPACE)
+
+k8s-verify:
+	kubectl rollout status deployment/$(HELM_RELEASE) -n $(K8S_NAMESPACE) --timeout=300s
+
+k8s-smoke:
+	SERVICE_URL=$$(kubectl get svc $(HELM_RELEASE) -n $(K8S_NAMESPACE) \
+		-o jsonpath='{.status.loadBalancer.ingress[0].hostname}'); \
+	if [ -z "$$SERVICE_URL" ]; then \
+		echo "Service URL not found; check service type or ingress." >&2; \
+		exit 1; \
+	fi; \
+	curl -f http://$$SERVICE_URL:8000/health; \
+	curl -f http://$$SERVICE_URL:8000/metrics || true
 
 clean:
 	find . -type d -name __pycache__ -exec rm -rf {} +

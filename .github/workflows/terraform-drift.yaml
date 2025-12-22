@@ -38,7 +38,7 @@ jobs:
       - name: Terraform Plan
         id: plan
         run: |
-            cd infrastructure/terraform/environments/dev
+            cd infrastructure/terraform/environments/staging
             terraform plan -detailed-exitcode -no-color > plan.txt
             echo "exitcode=$?" >> $GITHUB_OUTPUT
         continue-on-error: true

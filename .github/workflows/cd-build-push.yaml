@@ -63,7 +63,24 @@ jobs:
           fi
 
           echo "tag=$TAG" >> $GITHUB_OUTPUT
+          echo "git_sha=$GIT_SHA" >> $GITHUB_OUTPUT
           echo "Image tag: $TAG"
+
+      - name: Create image manifest
+        run: |
+          SEMVER="${{ github.event.inputs.version }}"
+          if [ -z "$SEMVER" ]; then
+            SEMVER=""
+          fi
+
+          cat > image-manifest.json << EOF
+          {
+            "git_tag": "${{ steps.tag.outputs.tag }}",
+            "semver": "$SEMVER",
+            "git_sha": "${{ steps.tag.outputs.git_sha }}",
+            "created_at": "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          }
+          EOF
 
       # =====================================================
       # AWS Authentication
@@ -76,6 +93,7 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
 
       - name: Login to Amazon ECR
+        id: login-ecr
         uses: aws-actions/amazon-ecr-login@v2
 
       - name: Set up Docker Buildx
@@ -123,18 +141,18 @@ jobs:
       - name: Push training image
         run: |
           docker tag training:${{ steps.tag.outputs.tag }} \
-            ${{ env.ECR_REGISTRY_TRAINING }}:${{ steps.tag.outputs.tag }}
+            ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REGISTRY_TRAINING }}:${{ steps.tag.outputs.tag }}
 
           docker push \
-            ${{ env.ECR_REGISTRY_TRAINING }}:${{ steps.tag.outputs.tag }}
+            ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REGISTRY_TRAINING }}:${{ steps.tag.outputs.tag }}
 
       - name: Push serving image
         run: |
           docker tag serving:${{ steps.tag.outputs.tag }} \
-            ${{ env.ECR_REGISTRY_SERVING }}:${{ steps.tag.outputs.tag }}
+            ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REGISTRY_SERVING }}:${{ steps.tag.outputs.tag }}
 
           docker push \
-            ${{ env.ECR_REGISTRY_SERVING }}:${{ steps.tag.outputs.tag }}
+            ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REGISTRY_SERVING }}:${{ steps.tag.outputs.tag }}
 
       # =====================================================
       # Image Signing (Keyless)
@@ -144,17 +162,17 @@ jobs:
           COSIGN_EXPERIMENTAL: "true"
         run: |
           cosign sign --yes \
-            ${{ env.ECR_REGISTRY_TRAINING }}:${{ steps.tag.outputs.tag }}
+            ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REGISTRY_TRAINING }}:${{ steps.tag.outputs.tag }}
 
           cosign sign --yes \
-            ${{ env.ECR_REGISTRY_SERVING }}:${{ steps.tag.outputs.tag }}
+            ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REGISTRY_SERVING }}:${{ steps.tag.outputs.tag }}
 
       # =====================================================
       # SBOM Generation & Attestation
       # =====================================================
       - name: Generate SBOM (serving image)
         run: |
-          syft ${{ env.ECR_REGISTRY_SERVING }}:${{ steps.tag.outputs.tag }} \
+          syft ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REGISTRY_SERVING }}:${{ steps.tag.outputs.tag }} \
             -o spdx-json=sbom-serving.json
 
       - name: Attest SBOM
@@ -164,7 +182,17 @@ jobs:
           cosign attest --yes \
             --predicate sbom-serving.json \
             --type spdxjson \
-            ${{ env.ECR_REGISTRY_SERVING }}:${{ steps.tag.outputs.tag }}
+            ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REGISTRY_SERVING }}:${{ steps.tag.outputs.tag }}
+
+      # =====================================================
+      # Publish Image Manifest
+      # =====================================================
+      - name: Upload image manifest
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-artifacts-${{ steps.tag.outputs.tag }}
+          path: image-manifest.json
+          retention-days: 30
 
       # =====================================================
       # Workflow Summary

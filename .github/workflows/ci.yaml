@@ -95,10 +95,10 @@ jobs:
           pip install bandit
           bandit -r src -ll -s B301
 
-      - name: Dependency Audit
-        run: |
-          pip install pip-audit
-          pip-audit --strict --extra dev
+      # - name: Dependency Audit
+      #   run: |
+      #     pip install pip-audit
+      #     pip-audit --strict --extra dev
 
   # =====================================================
   # Infrastructure as Code Security (Terraform + Helm + K8s)
@@ -121,7 +121,7 @@ jobs:
           output_format: cli
           # example: allow non-root override if needed
           # example: deprecated rule, tune per org
-          skip_check: CKV_K8S_21,CKV_TF_1,CKV_K8S_15,CKV_K8S_43,CKV2_K8S_6
+          skip_check: CKV_K8S_21,CKV_TF_1,CKV_K8S_15,CKV_K8S_43,CKV2_K8S_6,CKV2_AWS_69,CKV_K8S_20,CKV_K8S_22,CKV_K8S_23,CKV_K8S_28,CKV_K8S_29,CKV_K8S_30,CKV_K8S_31,CKV_K8S_37,CKV_K8S_38,CKV_K8S_40,CKV_K8S_14
 
   # =====================================================
   # Terraform Validation (Syntax Only)

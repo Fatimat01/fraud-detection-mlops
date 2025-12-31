@@ -78,7 +78,7 @@ infrastructure/terraform/**/*.tfplan
 infrastructure/terraform/**/.terraform.lock.hcl
 
 # Data
-data/
+
 *.csv
 *.parquet
 *.pkl

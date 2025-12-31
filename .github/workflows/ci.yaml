@@ -30,7 +30,7 @@ jobs:
           cache: pip
 
       - name: Install tooling
-        run: pip install ruff black mypy
+        run: pip install ruff black mypy types-PyYAML
 
       - name: Ruff
         run: ruff check --fix src tests

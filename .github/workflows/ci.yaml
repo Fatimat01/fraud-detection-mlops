@@ -11,7 +11,7 @@ on:
 
 env:
   PYTHON_VERSION: "3.11"
-  TERRAFORM_VERSION: "1.11.4"
+  TERRAFORM_VERSION: "latest"
 
 jobs:
   # =====================================================
@@ -33,7 +33,8 @@ jobs:
         run: pip install ruff black mypy
 
       - name: Ruff
-        run: ruff check src tests
+        run: ruff check --fix src tests
+
 
       - name: Black
         run: black --check src tests

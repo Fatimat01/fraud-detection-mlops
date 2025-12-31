@@ -63,7 +63,7 @@ jobs:
 
       - name: Run tests
         run: |
-          pytest tests/unit \
+          pytest tests \
             --cov=src \
             --cov-report=term-missing \
             --cov-report=xml

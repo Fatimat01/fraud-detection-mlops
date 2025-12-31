@@ -1,7 +1,7 @@
 locals {
-  target_env = "dev"
+  target_env   = "dev"
   project_name = "fraud-detection-${local.target_env}"
-  cluster_name = "${local.project_name}"
+  cluster_name = local.project_name
 }
 
 #data source eks
@@ -31,12 +31,12 @@ module "helm_addons" {
   cluster_name           = data.aws_eks_cluster.this.name
   cluster_endpoint       = data.aws_eks_cluster.this.endpoint
   cluster_ca_certificate = data.aws_eks_cluster.this.certificate_authority[0].data
-  oidc_provider_arn = data.aws_iam_openid_connect_provider.eks.arn
+  oidc_provider_arn      = data.aws_iam_openid_connect_provider.eks.arn
   environment            = local.target_env
-  vpc_id                = data.aws_eks_cluster.this.vpc_config[0].vpc_id
+  vpc_id                 = data.aws_eks_cluster.this.vpc_config[0].vpc_id
   # Security
-  enable_kyverno                      = true
-  enable_cert_manager                 = true
+  enable_kyverno      = true
+  enable_cert_manager = true
 
   # Networking
   enable_ingress_nginx                = true

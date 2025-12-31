@@ -14,6 +14,7 @@ ECR_REPOSITORY_TRAINING ?= fraud-detection-dev-training
 ECR_REPOSITORY_SERVING ?= fraud-detection-dev-serving
 IMAGE_TAG ?= git-$(shell git rev-parse --short HEAD)
 CORE_TF_ENV ?= dev
+TF_DIR ?= infrastructure/terraform
 CORE_TF_DIR ?= infrastructure/terraform/environments/$(CORE_TF_ENV)
 HELM_ADDON_DIR ?= infrastructure/terraform/helm-addons
 TF_BOOTSTRAP_DIR ?= infrastructure/terraform/bootstrap
@@ -124,6 +125,9 @@ tf-bootstrap:
 	terraform -chdir=$(TF_BOOTSTRAP_DIR) apply
 
 ##### Deploy Terraform infrastructure
+tf-format:
+	terraform -chdir=$(TF_DIR) fmt -recursive
+
 tf-init:
 	terraform -chdir=$(CORE_TF_DIR) init
 

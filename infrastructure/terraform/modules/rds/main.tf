@@ -153,7 +153,7 @@ resource "aws_db_parameter_group" "main" {
 
   parameter {
     name  = "log_min_duration_statement"
-    value = "1000"  # Log queries taking > 1 second
+    value = "1000" # Log queries taking > 1 second
   }
 
   tags = {

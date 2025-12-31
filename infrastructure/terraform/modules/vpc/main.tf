@@ -42,11 +42,11 @@ resource "aws_subnet" "public" {
   map_public_ip_on_launch = true
 
   tags = {
-    Name                                           = "${var.project_name}-${var.environment}-public-${local.azs[count.index]}"
-    Environment                                    = var.environment
-    Project                                        = var.project_name
-    ManagedBy                                      = "terraform"
-    "kubernetes.io/role/elb"                       = "1"
+    Name                                                           = "${var.project_name}-${var.environment}-public-${local.azs[count.index]}"
+    Environment                                                    = var.environment
+    Project                                                        = var.project_name
+    ManagedBy                                                      = "terraform"
+    "kubernetes.io/role/elb"                                       = "1"
     "kubernetes.io/cluster/${var.project_name}-${var.environment}" = "shared"
   }
 }
@@ -59,11 +59,11 @@ resource "aws_subnet" "private" {
   availability_zone = local.azs[count.index]
 
   tags = {
-    Name                                           = "${var.project_name}-${var.environment}-private-${local.azs[count.index]}"
-    Environment                                    = var.environment
-    Project                                        = var.project_name
-    ManagedBy                                      = "terraform"
-    "kubernetes.io/role/internal-elb"              = "1"
+    Name                                                           = "${var.project_name}-${var.environment}-private-${local.azs[count.index]}"
+    Environment                                                    = var.environment
+    Project                                                        = var.project_name
+    ManagedBy                                                      = "terraform"
+    "kubernetes.io/role/internal-elb"                              = "1"
     "kubernetes.io/cluster/${var.project_name}-${var.environment}" = "shared"
   }
 }

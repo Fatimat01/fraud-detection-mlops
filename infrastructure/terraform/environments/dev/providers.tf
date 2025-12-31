@@ -22,10 +22,10 @@ terraform {
   }
 
   backend "s3" {
-    bucket         = "fraud-detection-terraform-state-306617143793"
-    key            = "dev/core-infra/terraform.tfstate"
-    region         = "us-east-1"
+    bucket       = "fraud-detection-terraform-state-306617143793"
+    key          = "dev/core-infra/terraform.tfstate"
+    region       = "us-east-1"
     use_lockfile = true
-    encrypt        = true
+    encrypt      = true
   }
 }

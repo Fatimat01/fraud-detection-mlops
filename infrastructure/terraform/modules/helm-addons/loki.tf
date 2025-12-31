@@ -4,10 +4,10 @@ resource "helm_release" "loki" {
   name       = "loki"
   repository = "https://grafana.github.io/helm-charts"
   chart      = "loki"
-#  version    = "5.41.0"
-  namespace  = "monitoring"
+  #  version    = "5.41.0"
+  namespace = "monitoring"
 
-  create_namespace = false  # Already created
+  create_namespace = false # Already created
   wait             = true
   timeout          = 900
 
@@ -54,13 +54,13 @@ resource "helm_release" "loki" {
 
         # Limits
         limits_config = {
-          retention_period             = var.environment == "prod" ? "720h" : "360h"  # 30d or 15d
-          ingestion_rate_mb            = 10
-          ingestion_burst_size_mb      = 20
-          max_query_series             = 500
-          max_query_parallelism        = 32
-          reject_old_samples           = true
-          reject_old_samples_max_age   = "168h"
+          retention_period           = var.environment == "prod" ? "720h" : "360h" # 30d or 15d
+          ingestion_rate_mb          = 10
+          ingestion_burst_size_mb    = 20
+          max_query_series           = 500
+          max_query_parallelism      = 32
+          reject_old_samples         = true
+          reject_old_samples_max_age = "168h"
         }
 
         # Query configuration

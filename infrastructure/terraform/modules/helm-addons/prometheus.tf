@@ -5,8 +5,8 @@ resource "helm_release" "kube_prometheus_stack" {
   name       = "kube-prometheus-stack"
   repository = "https://prometheus-community.github.io/helm-charts"
   chart      = "kube-prometheus-stack"
-#  version    = "55.5.0"
-  namespace  = "monitoring"
+  #  version    = "55.5.0"
+  namespace = "monitoring"
 
   create_namespace = true
   wait             = true
@@ -47,7 +47,7 @@ resource "helm_release" "kube_prometheus_stack" {
           replicas = var.environment == "prod" ? 2 : 1
 
           # Retention
-          retention = var.environment == "prod" ? "30d" : "15d"
+          retention     = var.environment == "prod" ? "30d" : "15d"
           retentionSize = "10GB"
 
           # Storage
@@ -235,29 +235,29 @@ resource "helm_release" "kube_prometheus_stack" {
       defaultRules = {
         create = true
         rules = {
-          alertmanager              = true
-          etcd                      = true
-          configReloaders           = true
-          general                   = true
-          k8s                       = true
-          kubeApiserverAvailability = true
-          kubeApiserverSlos         = true
-          kubelet                   = true
-          kubeProxy                 = true
-          kubePrometheusGeneral     = true
+          alertmanager                = true
+          etcd                        = true
+          configReloaders             = true
+          general                     = true
+          k8s                         = true
+          kubeApiserverAvailability   = true
+          kubeApiserverSlos           = true
+          kubelet                     = true
+          kubeProxy                   = true
+          kubePrometheusGeneral       = true
           kubePrometheusNodeRecording = true
-          kubernetesApps            = true
-          kubernetesResources       = true
-          kubernetesStorage         = true
-          kubernetesSystem          = true
-          kubeScheduler             = true
-          kubeStateMetrics          = true
-          network                   = true
-          node                      = true
-          nodeExporterAlerting      = true
-          nodeExporterRecording     = true
-          prometheus                = true
-          prometheusOperator        = true
+          kubernetesApps              = true
+          kubernetesResources         = true
+          kubernetesStorage           = true
+          kubernetesSystem            = true
+          kubeScheduler               = true
+          kubeStateMetrics            = true
+          network                     = true
+          node                        = true
+          nodeExporterAlerting        = true
+          nodeExporterRecording       = true
+          prometheus                  = true
+          prometheusOperator          = true
         }
       }
 
@@ -265,13 +265,13 @@ resource "helm_release" "kube_prometheus_stack" {
       kubeControllerManager = {
         enabled = true
         service = {
-          enabled = true
-          port    = 10257
+          enabled    = true
+          port       = 10257
           targetPort = 10257
         }
         serviceMonitor = {
-          enabled = true
-          https   = true
+          enabled            = true
+          https              = true
           insecureSkipVerify = true
         }
       }
@@ -280,13 +280,13 @@ resource "helm_release" "kube_prometheus_stack" {
       kubeScheduler = {
         enabled = true
         service = {
-          enabled = true
-          port    = 10259
+          enabled    = true
+          port       = 10259
           targetPort = 10259
         }
         serviceMonitor = {
-          enabled = true
-          https   = true
+          enabled            = true
+          https              = true
           insecureSkipVerify = true
         }
       }
@@ -295,8 +295,8 @@ resource "helm_release" "kube_prometheus_stack" {
       coreDns = {
         enabled = true
         service = {
-          enabled = true
-          port    = 9153
+          enabled    = true
+          port       = 9153
           targetPort = 9153
         }
         serviceMonitor = {

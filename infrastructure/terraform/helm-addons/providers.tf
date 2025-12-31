@@ -30,11 +30,11 @@ terraform {
   }
 
   backend "s3" {
-    bucket         = "fraud-detection-terraform-state-306617143793"
-    key            = "dev/helm-addons/terraform.tfstate"
-    region         = "us-east-1"
+    bucket       = "fraud-detection-terraform-state-306617143793"
+    key          = "dev/helm-addons/terraform.tfstate"
+    region       = "us-east-1"
     use_lockfile = false
-    encrypt        = true
+    encrypt      = true
   }
 }
 

@@ -56,7 +56,7 @@ variable "grafana_admin_password" {
   description = "Grafana admin password"
   type        = string
   sensitive   = true
-  default     = ""  # Will be generated if not provided
+  default     = "" # Will be generated if not provided
 }
 
 variable "enable_prometheus" {

@@ -4,10 +4,10 @@ resource "helm_release" "grafana" {
   name       = "grafana"
   repository = "https://grafana.github.io/helm-charts"
   chart      = "grafana"
-#  version    = "10.0.0"
-  namespace  = "monitoring"
+  #  version    = "10.0.0"
+  namespace = "monitoring"
 
-  create_namespace = false  # Already created by prometheus
+  create_namespace = false # Already created by prometheus
   wait             = true
   timeout          = 900
 
@@ -124,15 +124,15 @@ resource "helm_release" "grafana" {
         default = {
           # Cluster overview
           "cluster-overview" = {
-            gnetId    = 7249
-            revision  = 1
+            gnetId     = 7249
+            revision   = 1
             datasource = "Prometheus"
           }
 
           # Node exporter full
           "node-exporter" = {
-            gnetId    = 1860
-            revision  = 31
+            gnetId     = 1860
+            revision   = 31
             datasource = "Prometheus"
           }
         }
@@ -140,29 +140,29 @@ resource "helm_release" "grafana" {
         kubernetes = {
           # Kubernetes cluster monitoring
           "k8s-cluster-monitoring" = {
-            gnetId    = 7249
-            revision  = 1
+            gnetId     = 7249
+            revision   = 1
             datasource = "Prometheus"
           }
 
           # Kubernetes pods
           "k8s-pods" = {
-            gnetId    = 6417
-            revision  = 1
+            gnetId     = 6417
+            revision   = 1
             datasource = "Prometheus"
           }
 
           # Kubernetes deployments
           "k8s-deployments" = {
-            gnetId    = 8588
-            revision  = 1
+            gnetId     = 8588
+            revision   = 1
             datasource = "Prometheus"
           }
 
           # Persistent volumes
           "k8s-persistent-volumes" = {
-            gnetId    = 13646
-            revision  = 2
+            gnetId     = 13646
+            revision   = 2
             datasource = "Prometheus"
           }
         }
@@ -193,9 +193,9 @@ resource "helm_release" "grafana" {
 
         users = {
           # Allow users to sign up
-          allow_sign_up         = false
-          auto_assign_org       = true
-          auto_assign_org_role  = "Viewer"
+          allow_sign_up        = false
+          auto_assign_org      = true
+          auto_assign_org_role = "Viewer"
         }
 
         auth = {

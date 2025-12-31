@@ -46,7 +46,7 @@ variable "eks_node_instance_types" {
 variable "eks_capacity_type" {
   description = "Capacity type (ON_DEMAND or SPOT)"
   type        = string
-  default     = "SPOT"  # Use SPOT for dev to save costs
+  default     = "SPOT" # Use SPOT for dev to save costs
 }
 
 variable "eks_node_desired_size" {

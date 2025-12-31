@@ -29,14 +29,14 @@ def client(
     mock_model: MagicMock, mock_feature_engineer: MagicMock
 ) -> Generator[TestClient, None, None]:
     """Test client with mocked model loading."""
-    with patch("builtins.open", mock_open(read_data=b"mock_pickle_data")):
-        with patch("pickle.load") as mock_pickle:
+    from src.serving import app as app_module
+
+    with patch.object(app_module, "open", mock_open(read_data=b"mock_pickle_data")):
+        with patch.object(app_module.pickle, "load") as mock_pickle:
             # First call returns model, second returns feature_engineer
             mock_pickle.side_effect = [mock_model, mock_feature_engineer]
 
-            from src.serving.app import app
-
-            with TestClient(app) as test_client:
+            with TestClient(app_module.app) as test_client:
                 yield test_client
 
 
@@ -174,13 +174,13 @@ def test_prediction_below_threshold(mock_feature_engineer: MagicMock) -> None:
     low_prob_model = MagicMock()
     low_prob_model.predict_proba.return_value = np.array([[0.7, 0.3]])  # 30% fraud
 
-    with patch("builtins.open", mock_open(read_data=b"mock_pickle_data")):
-        with patch("pickle.load") as mock_pickle:
+    from src.serving import app as app_module
+
+    with patch.object(app_module, "open", mock_open(read_data=b"mock_pickle_data")):
+        with patch.object(app_module.pickle, "load") as mock_pickle:
             mock_pickle.side_effect = [low_prob_model, mock_feature_engineer]
 
-            from src.serving.app import app
-
-            with TestClient(app) as client:
+            with TestClient(app_module.app) as client:
                 payload = {
                     "V1": 0.0,
                     "V2": 0.0,

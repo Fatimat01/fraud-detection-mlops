@@ -1,7 +1,8 @@
-make lint
+# Commands
 
 # Run tests
-make test
+- make lint
+- make test
 
 ## Local end-to-end deployment (Terraform + ECR + Helm)
 - 1. Set AWS + deployment variables (use your AWS profile or SSO as needed)
@@ -73,31 +74,9 @@ curl -X POST http://localhost:8000/predict \
 ```
 
 ---
+## Local Deployment Steps
 
-## Current Structure
-```
-fraud-detection-mlops/
-├── .dockerignore
-├── .github/workflows/
-├── .gitignore
-├── .pre-commit-config.yaml
-├── Makefile
-├── pyproject.toml
-├── docker-compose.yaml
-├── configs/
-│   ├── model_config.yaml
-│   └── prometheus.yaml
-├── data/
-│   └── creditcard.csv
-├── docker/
-│   ├── Dockerfile.training
-│   └── Dockerfile.serving
-├── models/
-│   ├── model.json
-│   └── feature_engineer.pkl
-├── src/
-│   └── ...
-└── tests/
-    └── ...
-```
+
+
+
 aws secretsmanager delete-secret --secret-id fraud-detection-dev-db-credentials --force-delete-without-recovery

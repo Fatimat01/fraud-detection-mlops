@@ -3,6 +3,11 @@ variable "cluster_name" {
   type        = string
 }
 
+variable "vpc_id" {
+  description = "VPC ID where EKS cluster is deployed"
+  type        = string
+}
+
 variable "cluster_endpoint" {
   description = "EKS cluster endpoint"
   type        = string

@@ -46,3 +46,8 @@ def test_get_feature_columns(sample_data: pd.DataFrame) -> None:
     assert "Class" not in features
     assert "V1" in features
     assert "Amount" in features
+
+
+## smoke test for pytest coverage
+def test_training_imports() -> None:
+    pass

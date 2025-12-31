@@ -9,7 +9,7 @@ on:
       - '.github/workflows/terraform-*.yaml'
 
 env:
-  TERRAFORM_VERSION: "1.9.0"
+  TERRAFORM_VERSION: "1.11.4"
   AWS_REGION: us-east-1
 
 jobs:
@@ -30,9 +30,7 @@ jobs:
             dev:
               - 'infrastructure/terraform/environments/dev/**'
               - 'infrastructure/terraform/modules/**'
-            staging:
-              - 'infrastructure/terraform/environments/staging/**'
-              - 'infrastructure/terraform/modules/**'
+
             prod:
               - 'infrastructure/terraform/environments/prod/**'
               - 'infrastructure/terraform/modules/**'
@@ -85,76 +83,6 @@ jobs:
             const fs = require('fs');
             const plan = fs.readFileSync('infrastructure/terraform/environments/dev/plan.txt', 'utf8');
             const output = `#### Terraform Plan - Dev Environment 🏗️
-
-            <details><summary>Show Plan</summary>
-
-            \`\`\`
-            ${plan}
-            \`\`\`
-
-            </details>
-
-            *Pusher: @${{ github.actor }}, Action: \`${{ github.event_name }}\`*`;
-
-            github.rest.issues.createComment({
-              issue_number: context.issue.number,
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              body: output
-            })
-
-      - name: Terraform Plan Status
-        if: steps.plan.outcome == 'failure'
-        run: exit 1
-
-  plan-staging:
-    name: Plan Staging
-    runs-on: ubuntu-latest
-    needs: detect-changes
-    if: needs.detect-changes.outputs.staging == 'true'
-    permissions:
-      contents: read
-      pull-requests: write
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Setup Terraform
-        uses: hashicorp/setup-terraform@v3
-        with:
-          terraform_version: ${{ env.TERRAFORM_VERSION }}
-
-      - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: ${{ env.AWS_REGION }}
-
-      - name: Terraform Init
-        run: |
-          cd infrastructure/terraform/environments/staging
-          terraform init
-
-      - name: Terraform Plan
-        id: plan
-        run: |
-          cd infrastructure/terraform/environments/staging
-          terraform plan -no-color -out=tfplan
-        continue-on-error: true
-
-      - name: Generate Plan Output
-        run: |
-          cd infrastructure/terraform/environments/staging
-          terraform show -no-color tfplan > plan.txt
-
-      - name: Comment PR
-        uses: actions/github-script@v7
-        with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-          script: |
-            const fs = require('fs');
-            const plan = fs.readFileSync('infrastructure/terraform/environments/staging/plan.txt', 'utf8');
-            const output = `#### Terraform Plan - Staging Environment ⚙️
 
             <details><summary>Show Plan</summary>
 

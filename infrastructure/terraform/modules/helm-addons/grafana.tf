@@ -4,16 +4,15 @@ resource "helm_release" "grafana" {
   name       = "grafana"
   repository = "https://grafana.github.io/helm-charts"
   chart      = "grafana"
-  version    = "7.0.8"
+#  version    = "10.0.0"
   namespace  = "monitoring"
 
   create_namespace = false  # Already created by prometheus
   wait             = true
-  timeout          = 300
+  timeout          = 900
 
   depends_on = [
-    helm_release.kube_prometheus_stack,
-    time_sleep.wait_for_cluster
+    helm_release.kube_prometheus_stack
   ]
 
   values = [

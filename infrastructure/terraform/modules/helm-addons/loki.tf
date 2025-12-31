@@ -4,14 +4,14 @@ resource "helm_release" "loki" {
   name       = "loki"
   repository = "https://grafana.github.io/helm-charts"
   chart      = "loki"
-  version    = "5.41.0"
+#  version    = "5.41.0"
   namespace  = "monitoring"
 
   create_namespace = false  # Already created
   wait             = true
-  timeout          = 300
+  timeout          = 900
 
-  depends_on = [time_sleep.wait_for_cluster]
+  depends_on = [helm_release.kube_prometheus_stack, time_sleep.wait_for_cluster]
 
   values = [
     yamlencode({
@@ -92,7 +92,7 @@ resource "helm_release" "loki" {
         persistence = {
           enabled          = true
           storageClassName = "gp3"
-          size             = var.environment == "prod" ? "50Gi" : "20Gi"
+          size             = var.environment == "prod" ? "10Gi" : "5Gi"
         }
       }
 
@@ -106,14 +106,11 @@ resource "helm_release" "loki" {
         }
 
         selfMonitoring = {
-          enabled = true
-          grafanaAgent = {
-            installOperator = false
-          }
+          enabled = false
         }
 
         lokiCanary = {
-          enabled = true
+          enabled = false
         }
       }
 
@@ -135,7 +132,7 @@ resource "helm_release" "promtail" {
 
   create_namespace = false
   wait             = true
-  timeout          = 300
+  timeout          = 600
 
   depends_on = [helm_release.loki]
 
@@ -208,15 +205,4 @@ resource "helm_release" "promtail" {
       }
     })
   ]
-}
-
-# Output
-output "loki_namespace" {
-  description = "Namespace where Loki is deployed"
-  value       = helm_release.loki.namespace
-}
-
-output "loki_service" {
-  description = "Loki service name"
-  value       = "loki"
 }

@@ -10,48 +10,22 @@ provider "aws" {
   }
 }
 
-#data sourec eks
-data "aws_eks_cluster" "this" {
-  name = module.eks.cluster_name
-}
 
-data "aws_eks_cluster_auth" "this" {
-  name = module.eks.cluster_name
-}
+terraform {
+  required_version = ">= 1.5"
 
-# helm provider configuration
-# Configure Kubernetes provider
-provider "kubernetes" {
-  host                   = data.aws_eks_cluster.this.endpoint
-  cluster_ca_certificate = base64decode(data.aws_eks_cluster.this.certificate_authority[0].data)
-
-  exec {
-    api_version = "client.authentication.k8s.io/v1beta1"
-    command     = "aws"
-    args = [
-      "eks",
-      "get-token",
-      "--cluster-name",
-      data.aws_eks_cluster.this.name
-    ]
-  }
-}
-
-# Configure Helm provider
-provider "helm" {
-  kubernetes {
-    host                   = data.aws_eks_cluster.this.endpoint
-    cluster_ca_certificate = base64decode(data.aws_eks_cluster.this.certificate_authority[0].data)
-
-    exec {
-      api_version = "client.authentication.k8s.io/v1beta1"
-      command     = "aws"
-      args = [
-        "eks",
-        "get-token",
-        "--cluster-name",
-        data.aws_eks_cluster.this.name
-      ]
+  required_providers {
+    aws = {
+      source  = "hashicorp/aws"
+      version = "~> 5.0"
     }
+  }
+
+  backend "s3" {
+    bucket         = "fraud-detection-terraform-state-306617143793"
+    key            = "dev/core-infra/terraform.tfstate"
+    region         = "us-east-1"
+    use_lockfile = true
+    encrypt        = true
   }
 }

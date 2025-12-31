@@ -192,7 +192,7 @@ jobs:
         with:
           name: release-artifacts-${{ steps.tag.outputs.tag }}
           path: image-manifest.json
-          retention-days: 30
+          retention-days: 5
 
       # =====================================================
       # Workflow Summary

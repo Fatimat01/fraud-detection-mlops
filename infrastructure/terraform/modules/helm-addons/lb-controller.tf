@@ -1,6 +1,14 @@
 # AWS Load Balancer Controller
 # Required for ALB/NLB integration with Kubernetes
 
+locals {
+  oidc_provider_url = replace(
+    var.oidc_provider_arn,
+    "arn:aws:iam::${split(":", var.oidc_provider_arn)[4]}:oidc-provider/",
+    ""
+  )
+}
+
 # IAM role for service account
 resource "aws_iam_role" "aws_load_balancer_controller" {
   count = var.enable_aws_load_balancer_controller ? 1 : 0
@@ -18,8 +26,8 @@ resource "aws_iam_role" "aws_load_balancer_controller" {
         Action = "sts:AssumeRoleWithWebIdentity"
         Condition = {
           StringEquals = {
-            "${replace(var.oidc_provider_arn, "/^(.*provider/)/", "")}:sub" = "system:serviceaccount:kube-system:aws-load-balancer-controller"
-            "${replace(var.oidc_provider_arn, "/^(.*provider/)/", "")}:aud" = "sts.amazonaws.com"
+            "${local.oidc_provider_url}:sub" = "system:serviceaccount:kube-system:aws-load-balancer-controller"
+            "${local.oidc_provider_url}:aud" = "sts.amazonaws.com"
           }
         }
       }
@@ -44,7 +52,7 @@ resource "helm_release" "aws_load_balancer_controller" {
   name       = "aws-load-balancer-controller"
   repository = "https://aws.github.io/eks-charts"
   chart      = "aws-load-balancer-controller"
-  version    = "1.6.0"
+#  version    = "1.6.0"
   namespace  = "kube-system"
 
   wait    = true
@@ -73,6 +81,11 @@ resource "helm_release" "aws_load_balancer_controller" {
   set {
     name  = "serviceAccount.annotations.eks\\.amazonaws\\.com/role-arn"
     value = aws_iam_role.aws_load_balancer_controller[0].arn
+  }
+
+  set {
+    name  = "vpcId"
+    value = var.vpc_id
   }
 
   set {

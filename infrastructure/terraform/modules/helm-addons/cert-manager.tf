@@ -5,14 +5,14 @@ resource "helm_release" "cert_manager" {
   name       = "cert-manager"
   repository = "https://charts.jetstack.io"
   chart      = "cert-manager"
-  version    = "v1.13.0"
+#  version    = "v1.13.0"
   namespace  = "cert-manager"
 
   create_namespace = true
   wait             = true
   timeout          = 300
 
-  depends_on = [time_sleep.wait_for_cluster]
+  depends_on = [time_sleep.wait_for_cluster, helm_release.aws_load_balancer_controller]
 
   values = [
     yamlencode({

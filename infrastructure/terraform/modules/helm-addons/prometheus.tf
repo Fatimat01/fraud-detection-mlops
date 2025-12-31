@@ -5,14 +5,14 @@ resource "helm_release" "kube_prometheus_stack" {
   name       = "kube-prometheus-stack"
   repository = "https://prometheus-community.github.io/helm-charts"
   chart      = "kube-prometheus-stack"
-  version    = "55.5.0"
+#  version    = "55.5.0"
   namespace  = "monitoring"
 
   create_namespace = true
   wait             = true
   timeout          = 600
 
-  depends_on = [time_sleep.wait_for_cluster]
+  depends_on = [time_sleep.wait_for_cluster, helm_release.aws_load_balancer_controller]
 
   values = [
     yamlencode({

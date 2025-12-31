@@ -5,14 +5,16 @@ resource "helm_release" "ingress_nginx" {
   name       = "ingress-nginx"
   repository = "https://kubernetes.github.io/ingress-nginx"
   chart      = "ingress-nginx"
-  version    = "4.8.0"
+#  version    = "4.14.0"
   namespace  = "ingress-nginx"
 
   create_namespace = true
   wait             = true
-  timeout          = 300
+  timeout          = 900
 
-  depends_on = [time_sleep.wait_for_cluster]
+  depends_on = [
+    helm_release.aws_load_balancer_controller
+  ]
 
   values = [
     yamlencode({

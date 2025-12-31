@@ -69,3 +69,19 @@ output "alertmanager_endpoint" {
   description = "AlertManager service endpoint"
   value       = var.enable_prometheus ? "http://kube-prometheus-stack-alertmanager.monitoring.svc.cluster.local:9093" : null
 }
+
+# Output
+output "loki_namespace" {
+  description = "Namespace where Loki is deployed"
+  value       = helm_release.loki.namespace
+}
+
+output "loki_service" {
+  description = "Loki service name"
+  value       = "loki"
+}
+
+# Output for use in other modules
+output "kyverno_namespace" {
+  value = var.enable_kyverno ? helm_release.kyverno[0].namespace : null
+}

@@ -13,8 +13,9 @@ ECR_REGISTRY ?= $(AWS_ACCOUNT_ID).dkr.ecr.$(AWS_REGION).amazonaws.com
 ECR_REPOSITORY_TRAINING ?= fraud-detection-dev-training
 ECR_REPOSITORY_SERVING ?= fraud-detection-dev-serving
 IMAGE_TAG ?= git-$(shell git rev-parse --short HEAD)
-TF_ENV ?= dev
-TF_DIR ?= infrastructure/terraform/environments/$(TF_ENV)
+CORE_TF_ENV ?= dev
+CORE_TF_DIR ?= infrastructure/terraform/environments/$(CORE_TF_ENV)
+HELM_ADDON_DIR ?= infrastructure/terraform/helm-addons
 TF_BOOTSTRAP_DIR ?= infrastructure/terraform/bootstrap
 EKS_CLUSTER_NAME ?=
 HELM_RELEASE ?= fraud-detection-serving
@@ -27,10 +28,13 @@ HELM_VALUES_ARG := $(if $(HELM_VALUES_FILE),--values $(HELM_VALUES_FILE),)
 # Platform targets
 PLATFORMS := linux/amd64,linux/arm64
 
+# Install dependencies
 install:
 	pip install -e ".[dev]"
 	pre-commit install
 
+##########################################################
+############## LINTING AND SECURITY CHECKS #################
 # Check code quality
 lint:
 	ruff check src tests
@@ -42,14 +46,22 @@ format:
 	ruff check --fix src tests
 	black src tests
 
-test:
+unit-test:
 	pytest tests/unit -v
 
+# Run tests with coverage
 test-all:
-	pytest tests -v --cov=src --cov-report=html
+	pytest tests -v --cov=src --cov-report=term-missing
 
+# Run security scan with defaults in pyproject.toml
 security:
 	bandit -r src -c pyproject.toml
+
+######################################################
+############## LOCAL DEVELOPMENT AND TESTING ################
+# Train model locally
+train-model:
+	python -m src.training.train
 
 # Setup buildx builder (run once)
 buildx-setup:
@@ -63,13 +75,14 @@ build-training-local:
 build-serving-local:
 	docker buildx build --load -f docker/Dockerfile.serving -t fraud-detection:serving .
 
+# build both images locally
 build-local: build-training-local build-serving-local
 
 # Multi-platform builds (push to registry)
-build-training:
+build-push-training:
 	docker buildx build --platform $(PLATFORMS) -f docker/Dockerfile.training -t fraud-detection:training --push .
 
-build-serving:
+build-push-serving:
 	docker buildx build --platform $(PLATFORMS) -f docker/Dockerfile.serving -t fraud-detection:serving --push .
 
 build: build-training build-serving
@@ -102,34 +115,65 @@ local-train:
 local-restart-serving:
 	$(COMPOSE_CMD) -f $(COMPOSE_FILE) restart serving
 
+
+##########################################################
+############## CLOUD INFRASTRUCTURE AND DEPLOYMENT ##########
+# Bootstrap Terraform backend
 tf-bootstrap:
 	terraform -chdir=$(TF_BOOTSTRAP_DIR) init
 	terraform -chdir=$(TF_BOOTSTRAP_DIR) apply
 
+##### Deploy Terraform infrastructure
 tf-init:
-	terraform -chdir=$(TF_DIR) init
+	terraform -chdir=$(CORE_TF_DIR) init
 
 tf-plan:
-	terraform -chdir=$(TF_DIR) plan
+	terraform -chdir=$(CORE_TF_DIR) plan
 
 tf-apply:
-	terraform -chdir=$(TF_DIR) plan -out=tfplan
-	terraform -chdir=$(TF_DIR) apply tfplan
-	rm -f $(TF_DIR)/tfplan
+	terraform -chdir=$(CORE_TF_DIR) plan -out=tfplan
+	terraform -chdir=$(CORE_TF_DIR) apply tfplan
+	rm -f $(CORE_TF_DIR)/tfplan
+
+deploy-core-infra: tf-init tf-plan tf-apply
 
 tf-destroy:
-	terraform -chdir=$(TF_DIR) destroy
+	terraform -chdir=$(CORE_TF_DIR) destroy
 
 tf-output:
-	terraform -chdir=$(TF_DIR) output
+	terraform -chdir=$(CORE_TF_DIR) output
 
+### Update kubeconfig with EKS cluster details
 kubeconfig:
 	@if [ -n "$(EKS_CLUSTER_NAME)" ]; then \
 		aws eks update-kubeconfig --region $(AWS_REGION) --name $(EKS_CLUSTER_NAME); \
 	else \
-		CLUSTER_NAME=$$(terraform -chdir=$(TF_DIR) output -raw eks_cluster_name); \
+		CLUSTER_NAME=$$(terraform -chdir=$(CORE_TF_DIR) output -raw eks_cluster_name); \
 		aws eks update-kubeconfig --region $(AWS_REGION) --name $$CLUSTER_NAME; \
 	fi
+
+## apply k8s manifests
+k8s-apply:
+	kubectl apply -f infrastructure/k8s-manifests/
+
+#### Deploy Helm Addons
+helm-addons-init:
+	terraform -chdir=$(HELM_ADDON_DIR) init -reconfigure
+
+helm-addons-plan:
+	terraform -chdir=$(HELM_ADDON_DIR) plan
+
+helm-addons-apply:
+	terraform -chdir=$(HELM_ADDON_DIR) plan -out=tfplan
+	terraform -chdir=$(HELM_ADDON_DIR) apply tfplan
+	rm -f $(HELM_ADDON_DIR)/tfplan
+
+deploy-helm-addons: helm-addons-init helm-addons-apply
+
+
+## destroy helm addons
+helm-addons-destroy:
+	terraform -chdir=$(HELM_ADDON_DIR) destroy
 
 ecr-login:
 	aws ecr get-login-password --region $(AWS_REGION) \

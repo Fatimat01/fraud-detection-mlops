@@ -5,12 +5,12 @@ resource "helm_release" "kyverno" {
   name       = "kyverno"
   repository = "https://kyverno.github.io/kyverno/"
   chart      = "kyverno"
-  version    = "3.1.0"
+#  version    = "3.6.1"
   namespace  = "kyverno"
 
   create_namespace = true
   wait             = true
-  timeout          = 300
+  timeout          = 900
 
   depends_on = [time_sleep.wait_for_cluster]
 
@@ -42,6 +42,14 @@ resource "helm_release" "kyverno" {
       admissionController = {
         replicas = var.environment == "prod" ? 3 : 1
       }
+
+      cleanupController = {
+        enabled = false
+      }
+
+      cleanupJobs = {
+        enabled = false
+      }
     })
   ]
 
@@ -49,9 +57,4 @@ resource "helm_release" "kyverno" {
     name  = "installCRDs"
     value = "true"
   }
-}
-
-# Output for use in other modules
-output "kyverno_namespace" {
-  value = var.enable_kyverno ? helm_release.kyverno[0].namespace : null
 }

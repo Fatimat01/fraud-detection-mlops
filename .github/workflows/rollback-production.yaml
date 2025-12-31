@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
     inputs:
       revision:
-        description: 'Helm revision to rollback to (leave empty for previous)'
+        description: 'Helm revision to rollback'
         required: false
       reason:
         description: 'Reason for rollback'
@@ -41,7 +41,7 @@ jobs:
       - name: Install Helm
         uses: azure/setup-helm@v3
         with:
-          version: 'v3.13.0'
+          version: 'v4.0.0'
 
       - name: View release history
         run: |

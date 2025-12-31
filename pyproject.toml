@@ -62,10 +62,6 @@ skips = ["B101", "B301", "B403"]
 requires = ["setuptools>=68.0"]
 build-backend = "setuptools.build_meta"
 
-[tool.setuptools.packages.find]
-where = ["."]
-include = ["src*"]
-
 [tool.setuptools]
 package-dir = {"" = "src"}
 

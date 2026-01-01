@@ -81,14 +81,10 @@ infrastructure/terraform/**/.terraform.lock.hcl
 
 *.csv
 *.parquet
-*.pkl
 *.joblib
 !configs/*.yaml
 
-# Models
-models/
-*.pt
-
+mlruns/
 ## ignore notes
 commands.txt
 ./commands.md

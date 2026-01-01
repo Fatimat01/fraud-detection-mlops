@@ -51,36 +51,16 @@ jobs:
       # =====================================================
       # Image Tagging
       # =====================================================
-      - name: Generate image tag
-        id: tag
+      - name: Set build tag
+        id: build_tag
         run: |
           GIT_SHA=$(git rev-parse --short HEAD)
 
-          if [ -n "${{ github.event.inputs.version }}" ]; then
-            TAG="${{ github.event.inputs.version }}-$GIT_SHA"
-          else
-            TAG="git-$GIT_SHA"
-          fi
+          TAG="build-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
 
           echo "tag=$TAG" >> $GITHUB_OUTPUT
           echo "git_sha=$GIT_SHA" >> $GITHUB_OUTPUT
-          echo "Image tag: $TAG"
-
-      - name: Create image manifest
-        run: |
-          SEMVER="${{ github.event.inputs.version }}"
-          if [ -z "$SEMVER" ]; then
-            SEMVER=""
-          fi
-
-          cat > image-manifest.json << EOF
-          {
-            "git_tag": "${{ steps.tag.outputs.tag }}",
-            "semver": "$SEMVER",
-            "git_sha": "${{ steps.tag.outputs.git_sha }}",
-            "created_at": "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-          }
-          EOF
+          echo "Build tag: $TAG"
 
       # =====================================================
       # AWS Authentication
@@ -106,13 +86,56 @@ jobs:
         run: |
           docker build \
             -f docker/Dockerfile.training \
-            -t training:${{ steps.tag.outputs.tag }} .
+            -t training:${{ steps.build_tag.outputs.tag }} .
 
       - name: Build serving image
         run: |
           docker build \
             -f docker/Dockerfile.serving \
-            -t serving:${{ steps.tag.outputs.tag }} .
+            -t serving:${{ steps.build_tag.outputs.tag }} .
+
+      - name: Tag images by digest
+        id: digest
+        run: |
+          TRAINING_ID=$(docker image inspect training:${{ steps.build_tag.outputs.tag }} --format '{{.Id}}')
+          TRAINING_DIGEST=${TRAINING_ID#sha256:}
+          TRAINING_TAG=sha256-${TRAINING_DIGEST}
+          docker tag training:${{ steps.build_tag.outputs.tag }} training:$TRAINING_TAG
+
+          SERVING_ID=$(docker image inspect serving:${{ steps.build_tag.outputs.tag }} --format '{{.Id}}')
+          SERVING_DIGEST=${SERVING_ID#sha256:}
+          SERVING_TAG=sha256-${SERVING_DIGEST}
+          docker tag serving:${{ steps.build_tag.outputs.tag }} serving:$SERVING_TAG
+
+          SEMVER="${{ github.event.inputs.version }}"
+          if [ -n "$SEMVER" ]; then
+            docker tag training:$TRAINING_TAG training:$SEMVER
+            docker tag serving:$SERVING_TAG serving:$SEMVER
+          fi
+
+          echo "training_tag=$TRAINING_TAG" >> $GITHUB_OUTPUT
+          echo "training_digest=sha256:$TRAINING_DIGEST" >> $GITHUB_OUTPUT
+          echo "serving_tag=$SERVING_TAG" >> $GITHUB_OUTPUT
+          echo "serving_digest=sha256:$SERVING_DIGEST" >> $GITHUB_OUTPUT
+          echo "semver=$SEMVER" >> $GITHUB_OUTPUT
+
+      - name: Create image manifest
+        run: |
+          cat > image-manifest.json << EOF
+          {
+            "git_sha": "${{ steps.build_tag.outputs.git_sha }}",
+            "semver": "${{ steps.digest.outputs.semver }}",
+            "created_at": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+            "training": {
+              "tag": "${{ steps.digest.outputs.training_tag }}",
+              "digest": "${{ steps.digest.outputs.training_digest }}"
+            },
+            "serving": {
+              "tag": "${{ steps.digest.outputs.serving_tag }}",
+              "digest": "${{ steps.digest.outputs.serving_digest }}"
+            }
+          }
+          EOF
 
       # =====================================================
       # Image Security Scanning (Blocking)
@@ -120,7 +143,7 @@ jobs:
       - name: Scan training image (Trivy)
         uses: aquasecurity/trivy-action@master
         with:
-          image-ref: training:${{ steps.tag.outputs.tag }}
+          image-ref: training:${{ steps.digest.outputs.training_tag }}
           severity: CRITICAL,HIGH
           ignore-unfixed: true
           exit-code: 1
@@ -129,7 +152,7 @@ jobs:
       - name: Scan serving image (Trivy)
         uses: aquasecurity/trivy-action@master
         with:
-          image-ref: serving:${{ steps.tag.outputs.tag }}
+          image-ref: serving:${{ steps.digest.outputs.serving_tag }}
           severity: CRITICAL,HIGH
           ignore-unfixed: true
           exit-code: 1
@@ -140,19 +163,35 @@ jobs:
       # =====================================================
       - name: Push training image
         run: |
-          docker tag training:${{ steps.tag.outputs.tag }} \
-            ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REGISTRY_TRAINING }}:${{ steps.tag.outputs.tag }}
+          docker tag training:${{ steps.digest.outputs.training_tag }} \
+            ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REGISTRY_TRAINING }}:${{ steps.digest.outputs.training_tag }}
 
           docker push \
-            ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REGISTRY_TRAINING }}:${{ steps.tag.outputs.tag }}
+            ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REGISTRY_TRAINING }}:${{ steps.digest.outputs.training_tag }}
+
+          if [ -n "${{ steps.digest.outputs.semver }}" ]; then
+            docker tag training:${{ steps.digest.outputs.training_tag }} \
+              ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REGISTRY_TRAINING }}:${{ steps.digest.outputs.semver }}
+
+            docker push \
+              ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REGISTRY_TRAINING }}:${{ steps.digest.outputs.semver }}
+          fi
 
       - name: Push serving image
         run: |
-          docker tag serving:${{ steps.tag.outputs.tag }} \
-            ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REGISTRY_SERVING }}:${{ steps.tag.outputs.tag }}
+          docker tag serving:${{ steps.digest.outputs.serving_tag }} \
+            ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REGISTRY_SERVING }}:${{ steps.digest.outputs.serving_tag }}
 
           docker push \
-            ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REGISTRY_SERVING }}:${{ steps.tag.outputs.tag }}
+            ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REGISTRY_SERVING }}:${{ steps.digest.outputs.serving_tag }}
+
+          if [ -n "${{ steps.digest.outputs.semver }}" ]; then
+            docker tag serving:${{ steps.digest.outputs.serving_tag }} \
+              ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REGISTRY_SERVING }}:${{ steps.digest.outputs.semver }}
+
+            docker push \
+              ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REGISTRY_SERVING }}:${{ steps.digest.outputs.semver }}
+          fi
 
       # =====================================================
       # Image Signing (Keyless)
@@ -162,17 +201,17 @@ jobs:
           COSIGN_EXPERIMENTAL: "true"
         run: |
           cosign sign --yes \
-            ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REGISTRY_TRAINING }}:${{ steps.tag.outputs.tag }}
+            ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REGISTRY_TRAINING }}:${{ steps.digest.outputs.training_tag }}
 
           cosign sign --yes \
-            ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REGISTRY_SERVING }}:${{ steps.tag.outputs.tag }}
+            ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REGISTRY_SERVING }}:${{ steps.digest.outputs.serving_tag }}
 
       # =====================================================
       # SBOM Generation & Attestation
       # =====================================================
       - name: Generate SBOM (serving image)
         run: |
-          syft ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REGISTRY_SERVING }}:${{ steps.tag.outputs.tag }} \
+          syft ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REGISTRY_SERVING }}:${{ steps.digest.outputs.serving_tag }} \
             -o spdx-json=sbom-serving.json
 
       - name: Attest SBOM
@@ -182,7 +221,7 @@ jobs:
           cosign attest --yes \
             --predicate sbom-serving.json \
             --type spdxjson \
-            ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REGISTRY_SERVING }}:${{ steps.tag.outputs.tag }}
+            ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REGISTRY_SERVING }}:${{ steps.digest.outputs.serving_tag }}
 
       # =====================================================
       # Publish Image Manifest
@@ -190,7 +229,7 @@ jobs:
       - name: Upload image manifest
         uses: actions/upload-artifact@v4
         with:
-          name: release-artifacts-${{ steps.tag.outputs.tag }}
+          name: release-artifacts-${{ steps.digest.outputs.training_tag }}
           path: image-manifest.json
           retention-days: 5
 
@@ -201,7 +240,8 @@ jobs:
         run: |
           echo "### Build & Push Complete 🚀" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "- **Tag:** ${{ steps.tag.outputs.tag }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Training Tag:** ${{ steps.digest.outputs.training_tag }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Serving Tag:** ${{ steps.digest.outputs.serving_tag }}" >> $GITHUB_STEP_SUMMARY
           echo "- **Image Scan:** ✓ Trivy (HIGH/CRITICAL enforced)" >> $GITHUB_STEP_SUMMARY
           echo "- **Signed:** ✓ Cosign keyless" >> $GITHUB_STEP_SUMMARY
           echo "- **SBOM:** ✓ Generated & attested" >> $GITHUB_STEP_SUMMARY

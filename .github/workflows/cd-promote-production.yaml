@@ -21,6 +21,7 @@ jobs:
     name: Pre-deployment Validation
     runs-on: ubuntu-latest
     outputs:
+      image_digest: ${{ steps.normalize.outputs.image_digest }}
       staging_image: ${{ steps.verify.outputs.staging_image }}
       prod_image: ${{ steps.verify.outputs.prod_image }}
 
@@ -43,6 +44,23 @@ jobs:
             --region ${{ env.AWS_REGION }} \
             --name ${{ env.EKS_CLUSTER_NAME }}
 
+      - name: Normalize image digest
+        id: normalize
+        run: |
+          INPUT_DIGEST="${{ github.event.inputs.image_digest }}"
+          if [[ "$INPUT_DIGEST" == sha256-* ]]; then
+            IMAGE_DIGEST="sha256:${INPUT_DIGEST#sha256-}"
+          else
+            IMAGE_DIGEST="$INPUT_DIGEST"
+          fi
+
+          if [ -z "$IMAGE_DIGEST" ] || [ "$IMAGE_DIGEST" = "null" ]; then
+            echo "❌ ERROR: image digest not provided"
+            exit 1
+          fi
+
+          echo "image_digest=$IMAGE_DIGEST" >> $GITHUB_OUTPUT
+
       - name: Verify image in staging
         id: verify
         run: |
@@ -55,8 +73,8 @@ jobs:
           echo "Staging image: $STAGING_IMAGE"
           echo "staging_image=$STAGING_IMAGE" >> $GITHUB_OUTPUT
 
-          if [[ "$STAGING_IMAGE" != *"@${{ github.event.inputs.image_digest }}"* ]]; then
-            echo "ERROR: Image ${{ github.event.inputs.image_digest }} not deployed in staging"
+          if [[ "$STAGING_IMAGE" != *"@${{ steps.normalize.outputs.image_digest }}"* ]]; then
+            echo "ERROR: Image ${{ steps.normalize.outputs.image_digest }} not deployed in staging"
             echo "Current staging image: $STAGING_IMAGE"
             exit 1
           fi
@@ -76,7 +94,7 @@ jobs:
 
           aws ecr describe-images \
             --repository-name fraud-detection-dev-serving \
-            --image-ids imageDigest=${{ github.event.inputs.image_digest }} \
+            --image-ids imageDigest=${{ steps.normalize.outputs.image_digest }} \
             || (echo "❌ Image not found in ECR" && exit 1)
 
           echo "✓ Image found in ECR"
@@ -85,7 +103,7 @@ jobs:
         run: |
           echo "### Pre-deployment Checks" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "- **Image to deploy:** ${{ github.event.inputs.image_digest }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Image to deploy:** ${{ steps.normalize.outputs.image_digest }}" >> $GITHUB_STEP_SUMMARY
           echo "- **Reason:** ${{ github.event.inputs.reason }}" >> $GITHUB_STEP_SUMMARY
           echo "- **Requested by:** ${{ github.actor }}" >> $GITHUB_STEP_SUMMARY
           echo "- **Current prod:** ${{ steps.verify.outputs.prod_image }}" >> $GITHUB_STEP_SUMMARY
@@ -106,12 +124,12 @@ jobs:
 
       - name: Re-tag image as prod-latest
         run: |
-          echo "Promoting ${{ github.event.inputs.image_digest }} to prod-latest..."
+          echo "Promoting ${{ needs.pre-checks.outputs.image_digest }} to prod-latest..."
 
           # Get image manifest
           MANIFEST=$(aws ecr batch-get-image \
             --repository-name fraud-detection-dev-serving \
-            --image-ids imageDigest=${{ github.event.inputs.image_digest }} \
+            --image-ids imageDigest=${{ needs.pre-checks.outputs.image_digest }} \
             --query 'images[0].imageManifest' \
             --output text)
 
@@ -167,7 +185,7 @@ jobs:
             --namespace prod \
             --create-namespace \
             --set image.repository=${{ steps.login-ecr.outputs.registry }}/fraud-detection-dev-serving \
-            --set image.digest=${{ github.event.inputs.image_digest }} \
+            --set image.digest=${{ needs.pre-checks.outputs.image_digest }} \
             --values ./helm/serving/values-prod.yaml \
             --atomic \
             --timeout 10m \
@@ -185,7 +203,7 @@ jobs:
 
           echo "Deployed image: $DEPLOYED_IMAGE"
 
-          if [[ "$DEPLOYED_IMAGE" != *"@${{ github.event.inputs.image_digest }}"* ]]; then
+          if [[ "$DEPLOYED_IMAGE" != *"@${{ needs.pre-checks.outputs.image_digest }}"* ]]; then
             echo "ERROR: Wrong image deployed!"
             exit 1
           fi
@@ -209,7 +227,7 @@ jobs:
           cat > deployment-record.json << EOF
           {
             "timestamp": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
-            "image_digest": "${{ github.event.inputs.image_digest }}",
+            "image_digest": "${{ needs.pre-checks.outputs.image_digest }}",
             "previous_image": "${{ needs.pre-checks.outputs.prod_image }}",
             "deployed_by": "${{ github.actor }}",
             "reason": "${{ github.event.inputs.reason }}",
@@ -223,7 +241,7 @@ jobs:
         run: |
           echo "### Production Deployment Complete" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "- **Image:** ${{ github.event.inputs.image_digest }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Image:** ${{ needs.pre-checks.outputs.image_digest }}" >> $GITHUB_STEP_SUMMARY
           echo "- **Previous:** ${{ needs.pre-checks.outputs.prod_image }}" >> $GITHUB_STEP_SUMMARY
           echo "- **Reason:** ${{ github.event.inputs.reason }}" >> $GITHUB_STEP_SUMMARY
           echo "- **Deployed by:** ${{ github.actor }}" >> $GITHUB_STEP_SUMMARY

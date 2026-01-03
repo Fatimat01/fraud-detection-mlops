@@ -94,48 +94,29 @@ jobs:
             -f docker/Dockerfile.serving \
             -t serving:${{ steps.build_tag.outputs.tag }} .
 
-      - name: Tag images by digest
-        id: digest
+      # =====================================================
+      # Tag Images (human-readable tags only)
+      # IMPORTANT: Do NOT treat docker .Id as ECR digest.
+      # =====================================================
+      - name: Tag images
+        id: tags
         run: |
-          TRAINING_ID=$(docker image inspect training:${{ steps.build_tag.outputs.tag }} --format '{{.Id}}')
-          TRAINING_DIGEST=${TRAINING_ID#sha256:}
-          TRAINING_TAG=sha256-${TRAINING_DIGEST}
-          docker tag training:${{ steps.build_tag.outputs.tag }} training:$TRAINING_TAG
-
-          SERVING_ID=$(docker image inspect serving:${{ steps.build_tag.outputs.tag }} --format '{{.Id}}')
-          SERVING_DIGEST=${SERVING_ID#sha256:}
-          SERVING_TAG=sha256-${SERVING_DIGEST}
-          docker tag serving:${{ steps.build_tag.outputs.tag }} serving:$SERVING_TAG
 
           SEMVER="${{ github.event.inputs.version }}"
+
+          # Keep a stable, traceable tag that’s safe for ECR
+          TRAINING_TAG="${{ steps.build_tag.outputs.tag }}"
+          SERVING_TAG="${{ steps.build_tag.outputs.tag }}"
+
+          # Add optional semver tags (labels only)
           if [ -n "$SEMVER" ]; then
-            docker tag training:$TRAINING_TAG training:$SEMVER
-            docker tag serving:$SERVING_TAG serving:$SEMVER
+            docker tag training:${{ steps.build_tag.outputs.tag }} training:$SEMVER
+            docker tag serving:${{ steps.build_tag.outputs.tag }} serving:$SEMVER
           fi
 
           echo "training_tag=$TRAINING_TAG" >> $GITHUB_OUTPUT
-          echo "training_digest=sha256:$TRAINING_DIGEST" >> $GITHUB_OUTPUT
           echo "serving_tag=$SERVING_TAG" >> $GITHUB_OUTPUT
-          echo "serving_digest=sha256:$SERVING_DIGEST" >> $GITHUB_OUTPUT
           echo "semver=$SEMVER" >> $GITHUB_OUTPUT
-
-      - name: Create image manifest
-        run: |
-          cat > image-manifest.json << EOF
-          {
-            "git_sha": "${{ steps.build_tag.outputs.git_sha }}",
-            "semver": "${{ steps.digest.outputs.semver }}",
-            "created_at": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
-            "training": {
-              "tag": "${{ steps.digest.outputs.training_tag }}",
-              "digest": "${{ steps.digest.outputs.training_digest }}"
-            },
-            "serving": {
-              "tag": "${{ steps.digest.outputs.serving_tag }}",
-              "digest": "${{ steps.digest.outputs.serving_digest }}"
-            }
-          }
-          EOF
 
       # =====================================================
       # Image Security Scanning (Blocking)
@@ -143,7 +124,7 @@ jobs:
       - name: Scan training image (Trivy)
         uses: aquasecurity/trivy-action@master
         with:
-          image-ref: training:${{ steps.digest.outputs.training_tag }}
+          image-ref: training:${{ steps.tags.outputs.training_tag }}
           severity: CRITICAL,HIGH
           ignore-unfixed: true
           exit-code: 1
@@ -152,7 +133,7 @@ jobs:
       - name: Scan serving image (Trivy)
         uses: aquasecurity/trivy-action@master
         with:
-          image-ref: serving:${{ steps.digest.outputs.serving_tag }}
+          image-ref: serving:${{ steps.tags.outputs.serving_tag }}
           severity: CRITICAL,HIGH
           ignore-unfixed: true
           exit-code: 1
@@ -163,85 +144,141 @@ jobs:
       # =====================================================
       - name: Push training image
         run: |
-          docker tag training:${{ steps.digest.outputs.training_tag }} \
-            ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REGISTRY_TRAINING }}:${{ steps.digest.outputs.training_tag }}
+          REG="${{ steps.login-ecr.outputs.registry }}"
+          REPO="${{ env.ECR_REGISTRY_TRAINING }}"
+          TAG="${{ steps.tags.outputs.training_tag }}"
 
-          docker push \
-            ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REGISTRY_TRAINING }}:${{ steps.digest.outputs.training_tag }}
+          docker tag training:$TAG "$REG/$REPO:$TAG"
+          docker push "$REG/$REPO:$TAG"
 
-          if [ -n "${{ steps.digest.outputs.semver }}" ]; then
-            docker tag training:${{ steps.digest.outputs.training_tag }} \
-              ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REGISTRY_TRAINING }}:${{ steps.digest.outputs.semver }}
-
-            docker push \
-              ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REGISTRY_TRAINING }}:${{ steps.digest.outputs.semver }}
+          if [ -n "${{ steps.tags.outputs.semver }}" ]; then
+            docker tag training:${{ steps.tags.outputs.semver }} "$REG/$REPO:${{ steps.tags.outputs.semver }}"
+            docker push "$REG/$REPO:${{ steps.tags.outputs.semver }}"
           fi
 
       - name: Push serving image
         run: |
-          docker tag serving:${{ steps.digest.outputs.serving_tag }} \
-            ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REGISTRY_SERVING }}:${{ steps.digest.outputs.serving_tag }}
+          REG="${{ steps.login-ecr.outputs.registry }}"
+          REPO="${{ env.ECR_REGISTRY_SERVING }}"
+          TAG="${{ steps.tags.outputs.serving_tag }}"
 
-          docker push \
-            ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REGISTRY_SERVING }}:${{ steps.digest.outputs.serving_tag }}
+          docker tag serving:$TAG "$REG/$REPO:$TAG"
+          docker push "$REG/$REPO:$TAG"
 
-          if [ -n "${{ steps.digest.outputs.semver }}" ]; then
-            docker tag serving:${{ steps.digest.outputs.serving_tag }} \
-              ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REGISTRY_SERVING }}:${{ steps.digest.outputs.semver }}
-
-            docker push \
-              ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REGISTRY_SERVING }}:${{ steps.digest.outputs.semver }}
+          if [ -n "${{ steps.tags.outputs.semver }}" ]; then
+            docker tag serving:${{ steps.tags.outputs.semver }} "$REG/$REPO:${{ steps.tags.outputs.semver }}"
+            docker push "$REG/$REPO:${{ steps.tags.outputs.semver }}"
           fi
 
+    # =====================================================
+      # Resolve AUTHORITATIVE ECR Digests
       # =====================================================
-      # Image Signing (Keyless)
+      - name: Resolve ECR image digests
+        id: digests
+        run: |
+          TRAINING_DIGEST=$(aws ecr describe-images \
+            --repository-name "${{ env.ECR_REGISTRY_TRAINING }}" \
+            --image-ids imageTag="${{ steps.tags.outputs.training_tag }}" \
+            --query 'imageDetails[0].imageDigest' \
+            --output text)
+
+          SERVING_DIGEST=$(aws ecr describe-images \
+            --repository-name "${{ env.ECR_REGISTRY_SERVING }}" \
+            --image-ids imageTag="${{ steps.tags.outputs.serving_tag }}" \
+            --query 'imageDetails[0].imageDigest' \
+            --output text)
+
+          if [[ ! "$TRAINING_DIGEST" =~ ^sha256: ]]; then
+            echo "❌ Failed to resolve TRAINING digest from ECR"
+            exit 1
+          fi
+
+          if [[ ! "$SERVING_DIGEST" =~ ^sha256: ]]; then
+            echo "❌ Failed to resolve SERVING digest from ECR"
+            exit 1
+          fi
+
+          echo "training_digest=$TRAINING_DIGEST" >> $GITHUB_OUTPUT
+          echo "serving_digest=$SERVING_DIGEST" >> $GITHUB_OUTPUT
+
+          echo "Training ECR digest: $TRAINING_DIGEST"
+          echo "Serving  ECR digest: $SERVING_DIGEST"
+
       # =====================================================
-      - name: Sign images with Cosign
+      # Image Signing (Keyless) — Sign by DIGEST (immutable)
+      # =====================================================
+      - name: Sign images with Cosign (digest)
         env:
           COSIGN_EXPERIMENTAL: "true"
         run: |
-          cosign sign --yes \
-            ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REGISTRY_TRAINING }}:${{ steps.digest.outputs.training_tag }}
+          REG="${{ steps.login-ecr.outputs.registry }}"
 
           cosign sign --yes \
-            ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REGISTRY_SERVING }}:${{ steps.digest.outputs.serving_tag }}
+            "$REG/${{ env.ECR_REGISTRY_TRAINING }}@${{ steps.digests.outputs.training_digest }}"
+
+          cosign sign --yes \
+            "$REG/${{ env.ECR_REGISTRY_SERVING }}@${{ steps.digests.outputs.serving_digest }}"
 
       # =====================================================
-      # SBOM Generation & Attestation
+      # SBOM Generation & Attestation — by DIGEST
       # =====================================================
       - name: Generate SBOM (serving image)
         run: |
-          syft ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REGISTRY_SERVING }}:${{ steps.digest.outputs.serving_tag }} \
+          REG="${{ steps.login-ecr.outputs.registry }}"
+          syft "$REG/${{ env.ECR_REGISTRY_SERVING }}@${{ steps.digests.outputs.serving_digest }}" \
             -o spdx-json=sbom-serving.json
 
       - name: Attest SBOM
         env:
           COSIGN_EXPERIMENTAL: "true"
         run: |
+          REG="${{ steps.login-ecr.outputs.registry }}"
           cosign attest --yes \
             --predicate sbom-serving.json \
             --type spdxjson \
-            ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REGISTRY_SERVING }}:${{ steps.digest.outputs.serving_tag }}
+            "$REG/${{ env.ECR_REGISTRY_SERVING }}@${{ steps.digests.outputs.serving_digest }}"
 
       # =====================================================
-      # Publish Image Manifest
+      # Create + Publish Image Manifest (digest is authoritative)
       # =====================================================
+      - name: Create image manifest
+        run: |
+          cat > image-manifest.json << EOF
+          {
+            "git_sha": "${{ steps.build_tag.outputs.git_sha }}",
+            "semver": "${{ steps.tags.outputs.semver }}",
+            "created_at": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+            "training": {
+              "repository": "${{ env.ECR_REGISTRY_TRAINING }}",
+              "tag": "${{ steps.tags.outputs.training_tag }}",
+              "digest": "${{ steps.digests.outputs.training_digest }}"
+            },
+            "serving": {
+              "repository": "${{ env.ECR_REGISTRY_SERVING }}",
+              "tag": "${{ steps.tags.outputs.serving_tag }}",
+              "digest": "${{ steps.digests.outputs.serving_digest }}"
+            }
+          }
+          EOF
+
       - name: Upload image manifest
         uses: actions/upload-artifact@v4
         with:
-          name: release-artifacts-${{ steps.digest.outputs.training_tag }}
+          name: release-artifacts
           path: image-manifest.json
-          retention-days: 5
+          retention-days: 2
 
-      # =====================================================
+    # =====================================================
       # Workflow Summary
       # =====================================================
       - name: Post build summary
         run: |
           echo "### Build & Push Complete 🚀" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "- **Training Tag:** ${{ steps.digest.outputs.training_tag }}" >> $GITHUB_STEP_SUMMARY
-          echo "- **Serving Tag:** ${{ steps.digest.outputs.serving_tag }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Training Tag:** ${{ steps.tags.outputs.training_tag }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Training Digest:** ${{ steps.digests.outputs.training_digest }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Serving Tag:** ${{ steps.tags.outputs.serving_tag }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Serving Digest:** ${{ steps.digests.outputs.serving_digest }}" >> $GITHUB_STEP_SUMMARY
           echo "- **Image Scan:** ✓ Trivy (HIGH/CRITICAL enforced)" >> $GITHUB_STEP_SUMMARY
-          echo "- **Signed:** ✓ Cosign keyless" >> $GITHUB_STEP_SUMMARY
-          echo "- **SBOM:** ✓ Generated & attested" >> $GITHUB_STEP_SUMMARY
+          echo "- **Signed:** ✓ Cosign keyless (by digest)" >> $GITHUB_STEP_SUMMARY
+          echo "- **SBOM:** ✓ Generated & attested (by digest)" >> $GITHUB_STEP_SUMMARY

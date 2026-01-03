@@ -5,8 +5,8 @@ name: Promote to Production
 on:
   workflow_dispatch:
     inputs:
-      image_tag:
-        description: 'Image tag from staging (e.g., sha-a1b2c3d)'
+      image_digest:
+        description: 'Image digest from staging (e.g., sha256:...)'
         required: true
       reason:
         description: 'Reason for deployment'
@@ -55,8 +55,8 @@ jobs:
           echo "Staging image: $STAGING_IMAGE"
           echo "staging_image=$STAGING_IMAGE" >> $GITHUB_OUTPUT
 
-          if [[ "$STAGING_IMAGE" != *"${{ github.event.inputs.image_tag }}"* ]]; then
-            echo "ERROR: Image ${{ github.event.inputs.image_tag }} not deployed in staging"
+          if [[ "$STAGING_IMAGE" != *"@${{ github.event.inputs.image_digest }}"* ]]; then
+            echo "ERROR: Image ${{ github.event.inputs.image_digest }} not deployed in staging"
             echo "Current staging image: $STAGING_IMAGE"
             exit 1
           fi
@@ -76,7 +76,7 @@ jobs:
 
           aws ecr describe-images \
             --repository-name fraud-detection-dev-serving \
-            --image-ids imageTag=${{ github.event.inputs.image_tag }} \
+            --image-ids imageDigest=${{ github.event.inputs.image_digest }} \
             || (echo "❌ Image not found in ECR" && exit 1)
 
           echo "✓ Image found in ECR"
@@ -85,7 +85,7 @@ jobs:
         run: |
           echo "### Pre-deployment Checks" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "- **Image to deploy:** ${{ github.event.inputs.image_tag }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Image to deploy:** ${{ github.event.inputs.image_digest }}" >> $GITHUB_STEP_SUMMARY
           echo "- **Reason:** ${{ github.event.inputs.reason }}" >> $GITHUB_STEP_SUMMARY
           echo "- **Requested by:** ${{ github.actor }}" >> $GITHUB_STEP_SUMMARY
           echo "- **Current prod:** ${{ steps.verify.outputs.prod_image }}" >> $GITHUB_STEP_SUMMARY
@@ -106,12 +106,12 @@ jobs:
 
       - name: Re-tag image as prod-latest
         run: |
-          echo "Promoting ${{ github.event.inputs.image_tag }} to prod-latest..."
+          echo "Promoting ${{ github.event.inputs.image_digest }} to prod-latest..."
 
           # Get image manifest
           MANIFEST=$(aws ecr batch-get-image \
             --repository-name fraud-detection-dev-serving \
-            --image-ids imageTag=${{ github.event.inputs.image_tag }} \
+            --image-ids imageDigest=${{ github.event.inputs.image_digest }} \
             --query 'images[0].imageManifest' \
             --output text)
 
@@ -167,7 +167,7 @@ jobs:
             --namespace prod \
             --create-namespace \
             --set image.repository=${{ steps.login-ecr.outputs.registry }}/fraud-detection-dev-serving \
-            --set image.tag=${{ github.event.inputs.image_tag }} \
+            --set image.digest=${{ github.event.inputs.image_digest }} \
             --values ./helm/serving/values-prod.yaml \
             --atomic \
             --timeout 10m \
@@ -185,7 +185,7 @@ jobs:
 
           echo "Deployed image: $DEPLOYED_IMAGE"
 
-          if [[ "$DEPLOYED_IMAGE" != *"${{ github.event.inputs.image_tag }}"* ]]; then
+          if [[ "$DEPLOYED_IMAGE" != *"@${{ github.event.inputs.image_digest }}"* ]]; then
             echo "ERROR: Wrong image deployed!"
             exit 1
           fi
@@ -209,7 +209,7 @@ jobs:
           cat > deployment-record.json << EOF
           {
             "timestamp": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
-            "image_tag": "${{ github.event.inputs.image_tag }}",
+            "image_digest": "${{ github.event.inputs.image_digest }}",
             "previous_image": "${{ needs.pre-checks.outputs.prod_image }}",
             "deployed_by": "${{ github.actor }}",
             "reason": "${{ github.event.inputs.reason }}",
@@ -223,7 +223,7 @@ jobs:
         run: |
           echo "### Production Deployment Complete" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "- **Image:** ${{ github.event.inputs.image_tag }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Image:** ${{ github.event.inputs.image_digest }}" >> $GITHUB_STEP_SUMMARY
           echo "- **Previous:** ${{ needs.pre-checks.outputs.prod_image }}" >> $GITHUB_STEP_SUMMARY
           echo "- **Reason:** ${{ github.event.inputs.reason }}" >> $GITHUB_STEP_SUMMARY
           echo "- **Deployed by:** ${{ github.actor }}" >> $GITHUB_STEP_SUMMARY

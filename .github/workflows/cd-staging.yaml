@@ -9,8 +9,8 @@ on:
     branches: [main]
   workflow_dispatch:
     inputs:
-      git_tag:
-        description: 'Git tag to deploy (e.g., git-a1b2c3d)'
+      image_digest:
+        description: 'Image digest to deploy (e.g., sha256:...)'
         required: true
 
 env:
@@ -43,7 +43,7 @@ jobs:
           version: 'latest'
 
       # ============================================
-      # Get Image Tag
+      # Get Image Digest
       # ============================================
       - name: Download image manifest
         if: github.event_name == 'workflow_run'
@@ -53,11 +53,16 @@ jobs:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           run-id: ${{ github.event.workflow_run.id }}
 
-      - name: Determine image tag
+      - name: Determine image digest
         id: image
         run: |
           if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
-            GIT_TAG="${{ github.event.inputs.git_tag }}"
+            IMAGE_DIGEST_INPUT="${{ github.event.inputs.image_digest }}"
+            if [[ "$IMAGE_DIGEST_INPUT" == sha256-* ]]; then
+              IMAGE_DIGEST="sha256:${IMAGE_DIGEST_INPUT#sha256-}"
+            else
+              IMAGE_DIGEST="$IMAGE_DIGEST_INPUT"
+            fi
           else
             # Find the manifest file
             MANIFEST_FILE=$(find . -name "image-manifest.json" | head -n 1)
@@ -67,14 +72,13 @@ jobs:
               exit 1
             fi
 
-            GIT_TAG=$(jq -r '.git_tag' "$MANIFEST_FILE")
+            IMAGE_DIGEST=$(jq -r '.serving.digest // empty' "$MANIFEST_FILE")
             SEMVER=$(jq -r '.semver' "$MANIFEST_FILE")
 
             echo "semver=$SEMVER" >> $GITHUB_OUTPUT
           fi
 
-          echo "git_tag=$GIT_TAG" >> $GITHUB_OUTPUT
-          echo "Deploying tag: $GIT_TAG"
+          echo "image_digest=$IMAGE_DIGEST" >> $GITHUB_OUTPUT
 
       # ============================================
       # AWS Configuration
@@ -89,6 +93,27 @@ jobs:
       - name: Login to Amazon ECR
         id: login-ecr
         uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Resolve image digest
+        id: resolve
+        run: |
+          IMAGE_DIGEST="${{ steps.image.outputs.image_digest }}"
+
+          if [ -z "$IMAGE_DIGEST" ] || [ "$IMAGE_DIGEST" = "null" ]; then
+            echo "❌ ERROR: image digest not found"
+            exit 1
+          fi
+
+          if [ -z "$IMAGE_DIGEST" ] || [ "$IMAGE_DIGEST" = "null" ]; then
+            echo "❌ ERROR: resolved image digest is empty"
+            exit 1
+          fi
+
+          IMAGE_DIGEST_SAFE=${IMAGE_DIGEST//:/-}
+
+          echo "image_digest=$IMAGE_DIGEST" >> $GITHUB_OUTPUT
+          echo "image_digest_safe=$IMAGE_DIGEST_SAFE" >> $GITHUB_OUTPUT
+          echo "Deploying digest: $IMAGE_DIGEST"
 
       - name: Update kubeconfig
         run: |
@@ -109,7 +134,7 @@ jobs:
 
           aws ecr describe-images \
             --repository-name fraud-detection-dev-serving \
-            --image-ids imageTag=${{ steps.image.outputs.git_tag }} \
+            --image-ids imageDigest=${{ steps.resolve.outputs.image_digest }} \
             || (echo "❌ Image not found in ECR" && exit 1)
 
           echo "✓ Image found in ECR"
@@ -118,7 +143,7 @@ jobs:
         env:
           COSIGN_EXPERIMENTAL: "true"
         run: |
-          IMAGE="${{ steps.login-ecr.outputs.registry }}/fraud-detection-dev-serving:${{ steps.image.outputs.git_tag }}"
+          IMAGE="${{ steps.login-ecr.outputs.registry }}/fraud-detection-dev-serving@${{ steps.resolve.outputs.image_digest }}"
 
           echo "========================================"
           echo "Verifying signature for: $IMAGE"
@@ -145,7 +170,7 @@ jobs:
         env:
           COSIGN_EXPERIMENTAL: "true"
         run: |
-          IMAGE="${{ steps.login-ecr.outputs.registry }}/fraud-detection-dev-serving:${{ steps.image.outputs.git_tag }}"
+          IMAGE="${{ steps.login-ecr.outputs.registry }}/fraud-detection-dev-serving@${{ steps.resolve.outputs.image_digest }}"
 
           echo "Verifying SBOM attestation..."
 
@@ -168,7 +193,7 @@ jobs:
             --namespace staging \
             --create-namespace \
             --set image.repository=${{ steps.login-ecr.outputs.registry }}/fraud-detection-dev-serving \
-            --set image.tag=${{ steps.image.outputs.git_tag }} \
+            --set image.digest=${{ steps.resolve.outputs.image_digest }} \
             --values ./helm/serving/values-staging.yaml \
             --atomic \
             --timeout 5m \
@@ -190,9 +215,9 @@ jobs:
 
           echo "Deployed image: $DEPLOYED_IMAGE"
 
-          if [[ "$DEPLOYED_IMAGE" != *"${{ steps.image.outputs.git_tag }}"* ]]; then
+          if [[ "$DEPLOYED_IMAGE" != *"@${{ steps.resolve.outputs.image_digest }}"* ]]; then
             echo "❌ ERROR: Wrong image deployed!"
-            echo "Expected tag: ${{ steps.image.outputs.git_tag }}"
+            echo "Expected digest: ${{ steps.resolve.outputs.image_digest }}"
             echo "Actual image: $DEPLOYED_IMAGE"
             exit 1
           fi
@@ -254,7 +279,7 @@ jobs:
           # Get image manifest
           MANIFEST=$(aws ecr batch-get-image \
             --repository-name fraud-detection-dev-serving \
-            --image-ids imageTag=${{ steps.image.outputs.git_tag }} \
+            --image-ids imageDigest=${{ steps.resolve.outputs.image_digest }} \
             --query 'images[0].imageManifest' \
             --output text)
 
@@ -275,9 +300,9 @@ jobs:
           {
             "timestamp": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
             "environment": "staging",
-            "git_tag": "${{ steps.image.outputs.git_tag }}",
             "semver": "${{ steps.image.outputs.semver }}",
-            "image": "${{ steps.login-ecr.outputs.registry }}/fraud-detection-dev-serving:${{ steps.image.outputs.git_tag }}",
+            "image_digest": "${{ steps.resolve.outputs.image_digest }}",
+            "image": "${{ steps.login-ecr.outputs.registry }}/fraud-detection-dev-serving@${{ steps.resolve.outputs.image_digest }}",
             "deployed_by": "${{ github.actor }}",
             "workflow_run": "${{ github.run_id }}",
             "signature_verified": true,
@@ -291,7 +316,7 @@ jobs:
       - name: Upload deployment record
         uses: actions/upload-artifact@v4
         with:
-          name: staging-deployment-${{ steps.image.outputs.git_tag }}
+          name: staging-deployment-${{ steps.resolve.outputs.image_digest_safe }}
           path: staging-deployment.json
           retention-days: 90
 
@@ -303,8 +328,8 @@ jobs:
           echo "### Staging Deployment Complete 🚀" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "#### Image Details" >> $GITHUB_STEP_SUMMARY
-          echo "- **Tag:** \`${{ steps.image.outputs.git_tag }}\`" >> $GITHUB_STEP_SUMMARY
-          echo "- **Image:** \`${{ steps.login-ecr.outputs.registry }}/fraud-detection-dev-serving:${{ steps.image.outputs.git_tag }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- **Digest:** \`${{ steps.resolve.outputs.image_digest }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- **Image:** \`${{ steps.login-ecr.outputs.registry }}/fraud-detection-dev-serving@${{ steps.resolve.outputs.image_digest }}\`" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "#### Security Verification" >> $GITHUB_STEP_SUMMARY
           echo "- **Signature:** ✓ Verified" >> $GITHUB_STEP_SUMMARY

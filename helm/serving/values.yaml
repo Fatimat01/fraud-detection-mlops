@@ -7,6 +7,7 @@ replicaCount: 1
 image:
   repository: fraud-detection-serving
   tag: latest
+  digest: ""
   pullPolicy: IfNotPresent
 
 service:

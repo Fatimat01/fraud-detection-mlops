@@ -55,7 +55,7 @@ module "helm_addons" {
 module "kyverno_policies" {
   source = "../modules/kyverno-policies"
 
-  environment = var.environment
+  environment = local.target_env
   github_org  = var.github_org
   github_repo = var.github_repo
 

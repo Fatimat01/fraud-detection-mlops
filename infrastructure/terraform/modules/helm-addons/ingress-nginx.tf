@@ -13,7 +13,7 @@ resource "helm_release" "ingress_nginx" {
   timeout          = 900
 
   depends_on = [
-    helm_release.aws_load_balancer_controller
+    time_sleep.wait_for_cluster
   ]
 
   values = [

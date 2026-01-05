@@ -2,6 +2,8 @@
 # Using kube-prometheus-stack (formerly prometheus-operator)
 
 resource "helm_release" "kube_prometheus_stack" {
+  count = var.enable_prometheus ? 1 : 0
+
   name       = "kube-prometheus-stack"
   repository = "https://prometheus-community.github.io/helm-charts"
   chart      = "kube-prometheus-stack"
@@ -12,7 +14,7 @@ resource "helm_release" "kube_prometheus_stack" {
   wait             = true
   timeout          = 600
 
-  depends_on = [time_sleep.wait_for_cluster, helm_release.aws_load_balancer_controller]
+  depends_on = [time_sleep.wait_for_cluster]
 
   values = [
     yamlencode({

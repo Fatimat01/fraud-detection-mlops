@@ -1,13 +1,15 @@
 # Grafana - Visualization and Dashboards
 
 resource "helm_release" "grafana" {
+  count = var.enable_grafana ? 1 : 0
+
   name       = "grafana"
   repository = "https://grafana.github.io/helm-charts"
   chart      = "grafana"
   #  version    = "10.0.0"
   namespace = "monitoring"
 
-  create_namespace = false # Already created by prometheus
+  create_namespace = true # Create if prometheus is disabled
   wait             = true
   timeout          = 900
 
@@ -282,10 +284,10 @@ resource "helm_release" "grafana" {
 # Output
 output "grafana_namespace" {
   description = "Namespace where Grafana is deployed"
-  value       = helm_release.grafana.namespace
+  value       = var.enable_grafana ? helm_release.grafana[0].namespace : null
 }
 
 output "grafana_service" {
   description = "Grafana service name"
-  value       = "grafana"
+  value       = var.enable_grafana ? "grafana" : null
 }

@@ -8,7 +8,7 @@ resource "helm_release" "kyverno_policies" {
   timeout = 300
 
   values = [
-    file("../../../helm/kyverno-policies/values.yaml")
+    file("${path.module}/../../../../helm/kyverno-policies/values.yaml")
   ]
 
   set {

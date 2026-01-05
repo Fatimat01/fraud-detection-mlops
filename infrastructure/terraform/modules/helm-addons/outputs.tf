@@ -20,17 +20,17 @@ output "aws_load_balancer_controller_installed" {
 
 output "prometheus_namespace" {
   description = "Namespace where Prometheus is deployed"
-  value       = helm_release.kube_prometheus_stack.namespace
+  value       = var.enable_prometheus ? helm_release.kube_prometheus_stack[0].namespace : null
 }
 
 output "prometheus_service" {
   description = "Prometheus service name"
-  value       = "kube-prometheus-stack-prometheus"
+  value       = var.enable_prometheus ? "kube-prometheus-stack-prometheus" : null
 }
 
 output "alertmanager_service" {
   description = "AlertManager service name"
-  value       = "kube-prometheus-stack-alertmanager"
+  value       = var.enable_prometheus ? "kube-prometheus-stack-alertmanager" : null
 }
 
 
@@ -73,12 +73,12 @@ output "alertmanager_endpoint" {
 # Output
 output "loki_namespace" {
   description = "Namespace where Loki is deployed"
-  value       = helm_release.loki.namespace
+  value       = var.enable_loki ? helm_release.loki[0].namespace : null
 }
 
 output "loki_service" {
   description = "Loki service name"
-  value       = "loki"
+  value       = var.enable_loki ? "loki" : null
 }
 
 # Output for use in other modules

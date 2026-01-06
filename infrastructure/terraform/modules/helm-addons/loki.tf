@@ -1,13 +1,15 @@
 # Loki - Log Aggregation System
 
 resource "helm_release" "loki" {
+  count = var.enable_loki ? 1 : 0
+
   name       = "loki"
   repository = "https://grafana.github.io/helm-charts"
   chart      = "loki"
   #  version    = "5.41.0"
   namespace = "monitoring"
 
-  create_namespace = false # Already created
+  create_namespace = true # Create if prometheus is disabled
   wait             = true
   timeout          = 900
 
@@ -131,6 +133,8 @@ resource "helm_release" "loki" {
 
 # Promtail - Log collector (DaemonSet on each node)
 resource "helm_release" "promtail" {
+  count = var.enable_loki ? 1 : 0
+
   name       = "promtail"
   repository = "https://grafana.github.io/helm-charts"
   chart      = "promtail"

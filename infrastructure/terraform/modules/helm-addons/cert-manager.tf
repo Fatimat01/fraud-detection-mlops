@@ -12,7 +12,7 @@ resource "helm_release" "cert_manager" {
   wait             = true
   timeout          = 300
 
-  depends_on = [time_sleep.wait_for_cluster, helm_release.aws_load_balancer_controller]
+  depends_on = [time_sleep.wait_for_cluster]
 
   values = [
     yamlencode({

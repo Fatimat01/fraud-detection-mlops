@@ -52,7 +52,7 @@ variable "eks_capacity_type" {
 variable "eks_node_desired_size" {
   description = "Desired number of nodes"
   type        = number
-  default     = 2
+  default     = 1
 }
 
 variable "eks_node_min_size" {
@@ -64,7 +64,7 @@ variable "eks_node_min_size" {
 variable "eks_node_max_size" {
   description = "Maximum number of nodes"
   type        = number
-  default     = 3
+  default     = 2
 }
 
 # RDS Variables
@@ -83,7 +83,7 @@ variable "rds_allocated_storage" {
 variable "github_org" {
   description = "GitHub organization name"
   type        = string
-  default     = "your-org"
+  default     = "Fatimat01"
 }
 
 variable "github_repo" {
@@ -92,16 +92,16 @@ variable "github_repo" {
   default     = "fraud-detection-mlops"
 }
 
-variable "grafana_admin_password" {
-  description = "Grafana admin password"
-  type        = string
-  sensitive   = true
+# variable "grafana_admin_password" {
+#   description = "Grafana admin password"
+#   type        = string
+#   sensitive   = true
 
-  validation {
-    condition     = length(var.grafana_admin_password) >= 8
-    error_message = "Grafana admin password must be at least 8 characters long."
-  }
-}
+#   validation {
+#     condition     = length(var.grafana_admin_password) >= 8
+#     error_message = "Grafana admin password must be at least 8 characters long."
+#   }
+# }
 
 # variable "cluster_name" {
 #   description = "EKS cluster name"

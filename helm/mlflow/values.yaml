@@ -1,0 +1,62 @@
+# helm/mlflow/values.yaml
+
+replicaCount: 1
+
+image:
+  repository: ghcr.io/mlflow/mlflow
+  tag: "v2.9.2"
+  pullPolicy: IfNotPresent
+
+service:
+  type: ClusterIP
+  port: 5000
+
+# Backend store (PostgreSQL)
+backend:
+  # Connection string set via secret
+  secretName: mlflow-backend-secret
+  secretKey: connection-string
+
+# Artifact store (S3)
+artifacts:
+  s3:
+    enabled: true
+    bucket: ""  # Set per environment
+    region: us-east-1
+
+# Service account for IRSA (S3 access)
+serviceAccount:
+  create: true
+  name: mlflow
+  annotations: {}
+
+resources:
+  requests:
+    memory: "256Mi"
+    cpu: "100m"
+  limits:
+    memory: "512Mi"
+    cpu: "500m"
+
+livenessProbe:
+  httpGet:
+    path: /health
+    port: 5000
+  initialDelaySeconds: 30
+  periodSeconds: 10
+
+readinessProbe:
+  httpGet:
+    path: /health
+    port: 5000
+  initialDelaySeconds: 10
+  periodSeconds: 5
+
+ingress:
+  enabled: false
+  className: nginx
+  host: ""
+  tls: []
+
+env:
+  MLFLOW_TRACKING_URI: "http://localhost:5000"

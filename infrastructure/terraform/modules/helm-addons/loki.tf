@@ -96,6 +96,13 @@ resource "helm_release" "loki" {
         }
       }
 
+      # SimpleScalable deployment (disabled when using SingleBinary)
+      simpleScalable = {
+        read    = { replicas = 0 }
+        write   = { replicas = 0 }
+        backend = { replicas = 0 }
+      }
+
       # Monitoring
       monitoring = {
         serviceMonitor = {

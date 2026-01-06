@@ -1,0 +1,8 @@
+# helm/mlflow/Chart.yaml
+
+apiVersion: v2
+name: mlflow
+description: MLflow Tracking Server for ML experiment tracking and model registry
+type: application
+version: 0.1.0
+appVersion: "2.9.2"

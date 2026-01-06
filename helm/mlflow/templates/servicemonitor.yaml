@@ -1,0 +1,16 @@
+# helm/mlflow/templates/servicemonitor.yaml
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: {{ include "mlflow.fullname" . }}
+  labels:
+    {{- include "mlflow.labels" . | nindent 4 }}
+    release: kube-prometheus-stack
+spec:
+  selector:
+    matchLabels:
+      {{- include "mlflow.selectorLabels" . | nindent 6 }}
+  endpoints:
+    - port: http
+      interval: 30s
+      path: /metrics

@@ -76,3 +76,49 @@ variable "enable_loki" {
   type        = bool
   default     = true
 }
+
+# Add these variables to existing variables.tf
+
+variable "enable_mlflow" {
+  description = "Enable MLflow tracking server"
+  type        = bool
+  default     = true
+}
+
+variable "mlflow_artifact_bucket" {
+  description = "S3 bucket for MLflow artifacts"
+  type        = string
+  default     = ""
+}
+
+variable "mlflow_db_host" {
+  description = "RDS host for MLflow backend"
+  type        = string
+  default     = ""
+}
+
+variable "mlflow_db_name" {
+  description = "Database name for MLflow"
+  type        = string
+  default     = "mlflow"
+}
+
+variable "mlflow_db_username" {
+  description = "Database username for MLflow"
+  type        = string
+  default     = "mlflow"
+  sensitive   = true
+}
+
+variable "mlflow_db_password" {
+  description = "Database password for MLflow"
+  type        = string
+  default     = ""
+  sensitive   = true
+}
+
+variable "aws_region" {
+  description = "AWS region"
+  type        = string
+  default     = "us-east-1"
+}

@@ -1,0 +1,61 @@
+# helm/mlflow/templates/deployment.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "mlflow.fullname" . }}
+  labels:
+    {{- include "mlflow.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "mlflow.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "mlflow.selectorLabels" . | nindent 8 }}
+    spec:
+      serviceAccountName: {{ include "mlflow.serviceAccountName" . }}
+      containers:
+        - name: {{ .Chart.Name }}
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: 5000
+              protocol: TCP
+          command:
+            - mlflow
+            - server
+            - --host=0.0.0.0
+            - --port=5000
+            - --backend-store-uri=$(BACKEND_STORE_URI)
+            {{- if .Values.artifacts.s3.enabled }}
+            - --default-artifact-root=s3://{{ .Values.artifacts.s3.bucket }}/artifacts
+            {{- end }}
+          env:
+            - name: BACKEND_STORE_URI
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.backend.secretName | default (printf "%s-backend" (include "mlflow.fullname" .)) }}
+                  key: {{ .Values.backend.secretKey | default "connection-string" }}
+            {{- if .Values.artifacts.s3.enabled }}
+            - name: AWS_DEFAULT_REGION
+              value: {{ .Values.artifacts.s3.region }}
+            {{- end }}
+            {{- range $key, $value := .Values.env }}
+            - name: {{ $key }}
+              value: {{ $value | quote }}
+            {{- end }}
+          {{- if .Values.livenessProbe }}
+          livenessProbe:
+            {{- toYaml .Values.livenessProbe | nindent 12 }}
+          {{- end }}
+          {{- if .Values.readinessProbe }}
+          readinessProbe:
+            {{- toYaml .Values.readinessProbe | nindent 12 }}
+          {{- end }}
+          {{- if .Values.resources }}
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          {{- end }}

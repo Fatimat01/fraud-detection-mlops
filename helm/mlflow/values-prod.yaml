@@ -1,0 +1,33 @@
+# helm/mlflow/values-prod.yaml
+
+replicaCount: 2
+
+artifacts:
+  s3:
+    enabled: true
+    bucket: "fraud-detection-prod-mlflow-artifacts"
+    region: us-east-1
+
+serviceAccount:
+  annotations:
+    eks.amazonaws.com/role-arn: ""  # Set via Terraform
+
+resources:
+  requests:
+    memory: "512Mi"
+    cpu: "250m"
+  limits:
+    memory: "1Gi"
+    cpu: "1000m"
+
+ingress:
+  enabled: true
+  className: nginx
+  host: "mlflow.prod.example.com"
+  tls:
+    - secretName: mlflow-tls
+      hosts:
+        - mlflow.prod.example.com
+
+env:
+  ENVIRONMENT: "prod"

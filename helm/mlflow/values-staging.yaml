@@ -1,0 +1,27 @@
+# helm/mlflow/values-staging.yaml
+
+replicaCount: 1
+
+artifacts:
+  s3:
+    enabled: true
+    bucket: "fraud-detection-staging-mlflow-artifacts"
+    region: us-east-1
+
+serviceAccount:
+  annotations:
+    eks.amazonaws.com/role-arn: ""  # Set via Terraform
+
+resources:
+  requests:
+    memory: "256Mi"
+    cpu: "100m"
+  limits:
+    memory: "512Mi"
+    cpu: "500m"
+
+ingress:
+  enabled: false
+
+env:
+  ENVIRONMENT: "staging"

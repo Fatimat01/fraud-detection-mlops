@@ -185,8 +185,7 @@ resource "helm_release" "grafana" {
         }
 
         security = {
-          admin_user     = "admin"
-          admin_password = var.grafana_admin_password
+          admin_user = "admin"
           # Disable guest access
           allow_embedding = false
         }

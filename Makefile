@@ -165,14 +165,13 @@ helm-addons-init:
 	terraform -chdir=$(HELM_ADDON_DIR) init -reconfigure
 
 helm-addons-plan:
-	terraform -chdir=$(HELM_ADDON_DIR) plan
+	terraform -chdir=$(HELM_ADDON_DIR) plan -out=tfplan
 
 helm-addons-apply:
-	terraform -chdir=$(HELM_ADDON_DIR) plan -out=tfplan
 	terraform -chdir=$(HELM_ADDON_DIR) apply tfplan
 	rm -f $(HELM_ADDON_DIR)/tfplan
 
-deploy-helm-addons: helm-addons-init helm-addons-apply
+deploy-helm-addons: helm-addons-plan helm-addons-apply
 
 
 ## destroy helm addons
